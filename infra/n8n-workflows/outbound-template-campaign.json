@@ -1,0 +1,95 @@
+{
+  "name": "Outbound Template Campaign",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "campaign-trigger",
+        "responseMode": "responseNode"
+      },
+      "name": "Campaign Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:4000/api/contacts",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer {{ $env.API_KEY }}"
+        },
+        "queryParameters": {
+          "segments": "={{ $json.segment }}",
+          "optInStatus": "opted_in",
+          "limit": "100"
+        }
+      },
+      "name": "Fetch Opted-In Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 50,
+        "options": {}
+      },
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:4000/api/whatsapp/send-template",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer {{ $env.API_KEY }}"
+        },
+        "body": {
+          "waAccountId": "={{ $json.waAccountId }}",
+          "to": "={{ $json.phone }}",
+          "templateName": "={{ $json.templateName }}",
+          "language": "={{ $json.language || 'en' }}",
+          "components": "={{ $json.components || [] }}"
+        }
+      },
+      "name": "Send Template Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "amount": 0.1,
+        "unit": "seconds"
+      },
+      "name": "Rate Limit Wait",
+      "type": "n8n-nodes-base.wait",
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, sent: $items().length }) }}"
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Campaign Trigger": {
+      "main": [[{ "node": "Fetch Opted-In Contacts", "type": "main", "index": 0 }]]
+    },
+    "Fetch Opted-In Contacts": {
+      "main": [[{ "node": "Split In Batches", "type": "main", "index": 0 }]]
+    },
+    "Split In Batches": {
+      "main": [[{ "node": "Send Template Message", "type": "main", "index": 0 }]]
+    },
+    "Send Template Message": {
+      "main": [[{ "node": "Rate Limit Wait", "type": "main", "index": 0 }]]
+    },
+    "Rate Limit Wait": {
+      "main": [[{ "node": "Split In Batches", "type": "main", "index": 0 }]]
+    }
+  }
+}

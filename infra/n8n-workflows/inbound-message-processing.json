@@ -1,0 +1,92 @@
+{
+  "name": "Inbound Message Processing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-inbound",
+        "responseMode": "responseNode"
+      },
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.type }}",
+              "operation": "equals",
+              "value2": "text"
+            }
+          ]
+        }
+      },
+      "name": "Is Text Message?",
+      "type": "n8n-nodes-base.if",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:4000/api/ai/classify",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer {{ $env.API_KEY }}"
+        },
+        "body": {
+          "message": "={{ $json.content.body }}",
+          "conversationId": "={{ $json.conversationId }}"
+        }
+      },
+      "name": "AI Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "rules": [
+            { "value": "product_inquiry", "output": 0 },
+            { "value": "complaint", "output": 1 },
+            { "value": "order_status", "output": 2 }
+          ]
+        },
+        "dataPropertyName": "intent"
+      },
+      "name": "Route by Intent",
+      "type": "n8n-nodes-base.switch",
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK"
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [450, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          { "node": "Is Text Message?", "type": "main", "index": 0 },
+          { "node": "Respond OK", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Is Text Message?": {
+      "main": [
+        [{ "node": "AI Classify Intent", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "AI Classify Intent": {
+      "main": [
+        [{ "node": "Route by Intent", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}
