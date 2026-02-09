@@ -67,14 +67,14 @@ export default function InboxPage() {
   }, [tpl, templateText]);
 
   return (
-    <>
+    <div className="h-full min-h-0 flex w-full overflow-hidden">
       {/* Left */}
-      <div className="w-96 border-r border-gray-200 flex flex-col">
+      <div className="w-96 shrink-0 border-r border-gray-200 flex flex-col overflow-hidden bg-white">
         <ConversationList />
       </div>
 
       {/* Center */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {selectedConversationId ? (
           <ConversationView conversationId={selectedConversationId} />
         ) : (
@@ -84,12 +84,14 @@ export default function InboxPage() {
         )}
       </div>
 
-      {/* Right */}
-      {selectedConversationId && (
-        <div className="w-96 border-l border-gray-200">
+      {/* Right (always present to keep layout stable) */}
+      <div className="w-[360px] shrink-0 border-l border-gray-200 overflow-hidden bg-white">
+        {selectedConversationId ? (
           <ConversationDetail conversationId={selectedConversationId} />
-        </div>
-      )}
-    </>
+        ) : (
+          <div className="h-full p-4 text-sm text-gray-400">Context</div>
+        )}
+      </div>
+    </div>
   );
 }
