@@ -109,7 +109,7 @@ Summary:`;
     }
 
     const result = await response.json();
-    return result.content[0].text;
+    return (result as any).content[0].text;
   }
 
   private async callOpenAI(prompt: string): Promise<string> {
