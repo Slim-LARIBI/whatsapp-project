@@ -40,13 +40,10 @@ export default function InboxPage() {
   useEffect(() => {
     if (!tpl || !templateText) return;
 
-    // 1) auto-select first conversation if none selected
     if (!selectedConversationId && conversations.length > 0) {
       selectConversation(conversations[0].id);
     }
 
-    // 2) put template into composer (append to keep agent's draft if any)
-    // Replace vars in mock mode with simple defaults
     const filled = templateText
       .replaceAll('{{first_name}}', 'Amira')
       .replaceAll('{{order_id}}', '1234')
@@ -60,38 +57,39 @@ export default function InboxPage() {
       .replaceAll('{{code}}', 'SAVE10')
       .replaceAll('{{ends_at}}', '2026-02-28');
 
-    // If composer empty -> set, else append
     setComposerDraft('');
     appendComposerDraft(filled);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tpl, templateText]);
 
   return (
-    <div className="h-full min-h-0 flex w-full overflow-hidden">
-      {/* Left */}
-      <div className="w-96 shrink-0 border-r border-gray-200 flex flex-col overflow-hidden bg-white">
+    <div className="h-full w-full flex overflow-hidden">
+      {/* LEFT */}
+      <aside className="w-96 shrink-0 border-r border-gray-200 flex flex-col bg-white">
         <ConversationList />
-      </div>
+      </aside>
 
-      {/* Center */}
-      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      {/* CENTER */}
+      <section className="flex-1 min-w-0 flex flex-col bg-white">
         {selectedConversationId ? (
-          <ConversationView conversationId={selectedConversationId} />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <ConversationView conversationId={selectedConversationId} />
+          </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-400">
             Select a conversation
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Right (always present to keep layout stable) */}
-      <div className="w-[360px] shrink-0 border-l border-gray-200 overflow-hidden bg-white">
+      {/* RIGHT */}
+      <aside className="w-[360px] shrink-0 border-l border-gray-200 bg-white overflow-y-auto">
         {selectedConversationId ? (
           <ConversationDetail conversationId={selectedConversationId} />
         ) : (
-          <div className="h-full p-4 text-sm text-gray-400">Context</div>
+          <div className="p-4 text-sm text-gray-400">Context</div>
         )}
-      </div>
+      </aside>
     </div>
   );
 }
