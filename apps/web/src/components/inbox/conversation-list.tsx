@@ -3,252 +3,315 @@
 import { useMemo, useState } from 'react';
 import { useInboxStore } from '@/store/inbox-store';
 import { cn } from '@/lib/utils';
-import { formatDistanceToNowStrict } from 'date-fns';
-import { Search } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+import {
+  Search,
+  Inbox,
+  CircleCheck,
+  Flame,
+  Sparkles,
+  SlidersHorizontal,
+} from 'lucide-react';
 
-type FilterKey = 'all' | 'needs_reply' | 'vip' | 'automations' | 'closed';
+type Filter = 'all' | 'unread' | 'open' | 'closed';
 
-// ✅ helper: safe string
-function s(v: unknown) {
-  return typeof v === 'string' ? v : '';
+function getInitial(name?: string, phone?: string) {
+  const src = (name?.trim() || phone?.trim() || '?').toUpperCase();
+  return src[0] || '?';
 }
 
-// ✅ mock business signals (front-only)
-// Tu pourras remplacer plus tard par Woo/Presta data.
-function deriveSignals(convo: any) {
-  const name = s(convo?.contact?.name);
-  const phone = s(convo?.contact?.phone);
-  const aiIntent = s(convo?.aiIntent);
-  const status = s(convo?.status);
+function safeDate(iso?: string) {
+  try {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
 
-  // VIP mock: si tag/flag existe ou nom contient "VIP" (fallback)
-  const isVip =
-    Boolean(convo?.isVip) ||
-    (Array.isArray(convo?.tags) && convo.tags.includes('VIP')) ||
-    name.toLowerCase().includes('vip');
+function intentLabel(intent?: string) {
+  if (!intent) return null;
 
-  // Automation mock: si aiIntent commence par "auto_" ou flag
-  const isAutomation =
-    Boolean(convo?.isAutomation) ||
-    aiIntent.toLowerCase().includes('automation') ||
-    aiIntent.toLowerCase().includes('auto_') ||
-    aiIntent.toLowerCase().includes('cart_abandoned');
-
-  // Needs reply: unread > 0 OR status open + inbound last msg (fallback)
-  const unread = Number(convo?.unreadCount ?? 0);
-  const needsReply = unread > 0 || status === 'open';
-
-  // SLA mock: si last msg < 10min -> pas SLA, si > 10min et needsReply => SLA
-  const lastAt = convo?.lastMessageAt ? new Date(convo.lastMessageAt) : null;
-  const minsAgo =
-    lastAt ? Math.floor((Date.now() - lastAt.getTime()) / 60000) : 0;
-  const slaCritical = needsReply && minsAgo >= 10;
-
-  // Cart amount mock
-  const cartAmountTnd =
-    typeof convo?.cartTotal === 'number'
-      ? convo.cartTotal
-      : aiIntent.toLowerCase().includes('cart') // fallback
-      ? 159
-      : null;
-
-  // Context line (2 infos max)
-  const contextLeft = isAutomation ? 'Automation' : aiIntent ? aiIntent : 'Conversation';
-  const contextRight = isVip ? 'VIP' : status ? status : '';
-  const context = [contextLeft, contextRight].filter(Boolean).slice(0, 2).join(' · ');
-
-  return {
-    name: name || phone || 'Unknown',
-    phone,
-    isVip,
-    isAutomation,
-    needsReply,
-    slaCritical,
-    cartAmountTnd,
-    minsAgo,
-    context,
+  // mini mapping (tu peux enrichir)
+  const map: Record<string, { label: string; icon?: any }> = {
+    order_issue: { label: 'Order', icon: Flame },
+    abandoned_cart: { label: 'Cart', icon: Flame },
+    thanks: { label: 'Thanks', icon: Sparkles },
+    support: { label: 'Support', icon: Inbox },
   };
-}
 
-function statusDotColor(sig: ReturnType<typeof deriveSignals>, convo: any) {
-  const status = s(convo?.status);
-  if (status === 'closed') return 'bg-gray-300';
-  if (sig.isAutomation) return 'bg-orange-400';
-  if (sig.needsReply) return 'bg-red-500';
-  return 'bg-gray-400';
+  return map[intent] || { label: intent, icon: Sparkles };
 }
 
 export function ConversationList() {
   const { conversations, selectedConversationId, selectConversation } = useInboxStore();
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<FilterKey>('all');
+
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [showFilters, setShowFilters] = useState(false);
+
+  const stats = useMemo(() => {
+    const list = Array.isArray(conversations) ? conversations : [];
+    const unread = list.reduce((sum: number, c: any) => sum + (Number(c?.unreadCount) || 0), 0);
+    const open = list.filter((c: any) => c?.status === 'open').length;
+    const closed = list.filter((c: any) => c?.status === 'closed').length;
+    return { unread, open, closed, total: list.length };
+  }, [conversations]);
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const list = Array.isArray(conversations) ? conversations : [];
+    const query = q.trim().toLowerCase();
 
-    const withSignals = (conversations as any[]).map((c) => {
-      const sig = deriveSignals(c);
-      return { c, sig };
-    });
+    return list
+      .filter((c: any) => {
+        // filter tabs
+        if (filter === 'unread' && !(Number(c?.unreadCount) > 0)) return false;
+        if (filter === 'open' && c?.status !== 'open') return false;
+        if (filter === 'closed' && c?.status !== 'closed') return false;
 
-    const bySearch = withSignals.filter(({ sig }) => {
-      if (!q) return true;
-      return sig.name.toLowerCase().includes(q) || sig.phone.includes(search.trim());
-    });
+        // search
+        if (!query) return true;
+        const name = (c?.contact?.name || '').toLowerCase();
+        const phone = (c?.contact?.phone || '').toLowerCase();
+        const intent = (c?.aiIntent || '').toLowerCase();
+        const summary = (c?.aiSummary || '').toLowerCase();
+        return (
+          name.includes(query) ||
+          phone.includes(query) ||
+          intent.includes(query) ||
+          summary.includes(query)
+        );
+      })
+      .sort((a: any, b: any) => {
+        // newest first
+        const da = safeDate(a?.lastMessageAt)?.getTime() || 0;
+        const db = safeDate(b?.lastMessageAt)?.getTime() || 0;
+        return db - da;
+      });
+  }, [conversations, q, filter]);
 
-    const byFilter = bySearch.filter(({ c, sig }) => {
-      const status = s(c?.status);
-      if (filter === 'all') return true;
-      if (filter === 'needs_reply') return sig.needsReply && status !== 'closed';
-      if (filter === 'vip') return sig.isVip && status !== 'closed';
-      if (filter === 'automations') return sig.isAutomation && status !== 'closed';
-      if (filter === 'closed') return status === 'closed';
-      return true;
-    });
-
-    // ✅ Smart sort (CRC priority)
-    const sorted = byFilter.sort((a, b) => {
-      const aClosed = s(a.c?.status) === 'closed';
-      const bClosed = s(b.c?.status) === 'closed';
-
-      // closed last
-      if (aClosed !== bClosed) return aClosed ? 1 : -1;
-
-      // needs reply first
-      if (a.sig.needsReply !== b.sig.needsReply) return a.sig.needsReply ? -1 : 1;
-
-      // SLA critical next
-      if (a.sig.slaCritical !== b.sig.slaCritical) return a.sig.slaCritical ? -1 : 1;
-
-      // VIP next
-      if (a.sig.isVip !== b.sig.isVip) return a.sig.isVip ? -1 : 1;
-
-      // automation next
-      if (a.sig.isAutomation !== b.sig.isAutomation) return a.sig.isAutomation ? -1 : 1;
-
-      // newest lastMessageAt
-      const aT = a.c?.lastMessageAt ? new Date(a.c.lastMessageAt).getTime() : 0;
-      const bT = b.c?.lastMessageAt ? new Date(b.c.lastMessageAt).getTime() : 0;
-      return bT - aT;
-    });
-
-    return sorted;
-  }, [conversations, search, filter]);
+  const activeIndex = useMemo(() => {
+    if (!selectedConversationId) return -1;
+    return filtered.findIndex((c: any) => c?.id === selectedConversationId);
+  }, [filtered, selectedConversationId]);
 
   return (
-    <div className="h-full flex flex-col">
-      {/* Header (fixed) */}
-      <div className="p-3 border-b border-gray-200 bg-white">
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
-          <input
-            type="text"
-            placeholder="Search…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-whatsapp-green"
-          />
+    <div className="h-full flex flex-col min-h-0">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 bg-white border-b border-gray-200">
+        {/* Title + stats */}
+        <div className="px-4 pt-4 pb-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-gray-900">Inbox</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              {stats.total} conv ·{' '}
+              <span className="text-gray-700 font-medium">{stats.unread}</span> unread
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowFilters((v) => !v)}
+            className={cn(
+              'p-2 rounded-lg border text-gray-700 hover:bg-gray-50',
+              showFilters ? 'border-gray-300 bg-gray-50' : 'border-gray-200 bg-white',
+            )}
+            title="Filters"
+            aria-label="Filters"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
         </div>
 
-        {/* Filter tabs */}
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          <Tab label="All" active={filter === 'all'} onClick={() => setFilter('all')} />
-          <Tab label="Needs reply" active={filter === 'needs_reply'} onClick={() => setFilter('needs_reply')} />
-          <Tab label="VIP" active={filter === 'vip'} onClick={() => setFilter('vip')} />
-          <Tab label="Automations" active={filter === 'automations'} onClick={() => setFilter('automations')} />
-          <Tab label="Closed" active={filter === 'closed'} onClick={() => setFilter('closed')} />
+        {/* Search */}
+        <div className="px-4 pb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name, phone, intent..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-whatsapp-green bg-white"
+            />
+          </div>
         </div>
+
+        {/* Filters row */}
+        {showFilters && (
+          <div className="px-4 pb-4">
+            <div className="flex flex-wrap gap-2">
+              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
+                All
+              </FilterChip>
+
+              <FilterChip active={filter === 'unread'} onClick={() => setFilter('unread')}>
+                Unread
+                {stats.unread > 0 && (
+                  <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-gray-900 text-white">
+                    {stats.unread}
+                  </span>
+                )}
+              </FilterChip>
+
+              <FilterChip active={filter === 'open'} onClick={() => setFilter('open')}>
+                Open
+                <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                  {stats.open}
+                </span>
+              </FilterChip>
+
+              <FilterChip active={filter === 'closed'} onClick={() => setFilter('closed')}>
+                Closed
+                <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                  {stats.closed}
+                </span>
+              </FilterChip>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto bg-white">
-        {filtered.map(({ c: convo, sig }) => {
-          const isSelected = selectedConversationId === convo.id;
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <div className="p-6 text-sm text-gray-500">
+            No conversations found.
+            {q.trim() ? (
+              <div className="mt-1 text-xs text-gray-400">Try another keyword.</div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {filtered.map((convo: any, idx: number) => {
+              const active = selectedConversationId === convo?.id;
 
-          const timeLabel = convo.lastMessageAt
-            ? formatDistanceToNowStrict(new Date(convo.lastMessageAt), { addSuffix: true })
-            : '';
+              const name = convo?.contact?.name || convo?.contact?.phone || 'Unknown';
+              const phone = convo?.contact?.phone || '';
+              const unread = Number(convo?.unreadCount) || 0;
 
-          return (
-            <button
-              key={convo.id}
-              onClick={() => selectConversation(convo.id)}
-              className={cn(
-                'w-full text-left px-3 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors',
-                isSelected && 'bg-green-50',
-              )}
-            >
-              <div className="flex items-start gap-3">
-                {/* Status dot */}
-                <span className={cn('mt-1 w-2.5 h-2.5 rounded-full flex-shrink-0', statusDotColor(sig, convo))} />
+              const d = safeDate(convo?.lastMessageAt);
+              const time = d ? formatDistanceToNow(d, { addSuffix: true }) : '';
 
-                {/* Main */}
-                <div className="flex-1 min-w-0">
-                  {/* Line 1 */}
-                  <div className="flex items-baseline justify-between gap-2">
-                    <div className="font-medium text-sm truncate">{sig.name}</div>
-                    <div className="text-xs text-gray-400 flex-shrink-0">{timeLabel}</div>
+              const intent = intentLabel(convo?.aiIntent);
+              const IntentIcon = intent?.icon;
+
+              const status = (convo?.status || '').toLowerCase();
+
+              return (
+                <button
+                  key={convo?.id}
+                  onClick={() => selectConversation(convo?.id)}
+                  className={cn(
+                    'w-full text-left px-4 py-3 flex gap-3 transition-colors',
+                    active ? 'bg-green-50' : 'hover:bg-gray-50',
+                  )}
+                >
+                  {/* Avatar */}
+                  <div
+                    className={cn(
+                      'w-10 h-10 rounded-full flex items-center justify-center font-semibold text-sm flex-shrink-0',
+                      active ? 'bg-whatsapp-green text-white' : 'bg-gray-100 text-gray-700',
+                    )}
+                  >
+                    {getInitial(convo?.contact?.name, convo?.contact?.phone)}
                   </div>
 
-                  {/* Line 2 (context) */}
-                  <div className="mt-1 text-xs text-gray-600 truncate">
-                    {sig.context}
-                  </div>
+                  {/* Middle */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm text-gray-900 truncate">{name}</div>
+                        <div className="text-xs text-gray-500 truncate">{phone}</div>
+                      </div>
 
-                  {/* Line 3 (signals) */}
-                  <div className="mt-2 flex items-center gap-2 flex-wrap">
-                    {sig.isVip && <Badge tone="gold" label="VIP" />}
-                    {sig.cartAmountTnd != null && <Badge tone="blue" label={`🛒 ${sig.cartAmountTnd} TND`} />}
-                    {sig.slaCritical && <Badge tone="red" label="SLA" />}
-                    {sig.isAutomation && <Badge tone="orange" label="🤖 Auto" />}
-                    {Number(convo.unreadCount ?? 0) > 0 && (
-                      <span className="ml-auto bg-whatsapp-green text-white text-[10px] px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
-                        {convo.unreadCount}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-[11px] text-gray-400">{time}</span>
+                        {unread > 0 && (
+                          <span className="bg-whatsapp-green text-white text-[10px] px-2 py-0.5 rounded-full min-w-[22px] text-center">
+                            {unread}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Chips */}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      {/* Status */}
+                      <span
+                        className={cn(
+                          'text-[10px] px-2 py-0.5 rounded-full border',
+                          status === 'open'
+                            ? 'bg-white border-green-200 text-green-700'
+                            : status === 'closed'
+                            ? 'bg-white border-gray-200 text-gray-600'
+                            : 'bg-white border-yellow-200 text-yellow-700',
+                        )}
+                      >
+                        {status || 'unknown'}
                       </span>
+
+                      {/* Intent */}
+                      {intent && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 inline-flex items-center gap-1">
+                          {IntentIcon ? <IntentIcon size={12} /> : null}
+                          {intent.label}
+                        </span>
+                      )}
+
+                      {/* AI Summary preview */}
+                      {convo?.aiSummary ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 truncate max-w-[220px]">
+                          {convo.aiSummary}
+                        </span>
+                      ) : null}
+
+                      {/* Active marker (nice touch) */}
+                      {active && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1">
+                          <CircleCheck size={12} />
+                          Active
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Keyboard hint (optional) */}
+                    {activeIndex === idx && (
+                      <div className="mt-2 text-[11px] text-gray-400">
+                        Tip: use Templates / AI reply in the header →
+                      </div>
                     )}
                   </div>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-
-        {filtered.length === 0 && (
-          <div className="p-6 text-sm text-gray-500">No conversations.</div>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-function Tab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function FilterChip({
+  active,
+  children,
+  onClick,
+}: {
+  active?: boolean;
+  children: React.ReactNode;
+  onClick?: () => void;
+}) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        'text-xs px-3 py-1.5 rounded-full border whitespace-nowrap',
-        active ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50',
+        'px-3 py-2 text-xs rounded-xl border transition-colors inline-flex items-center',
+        active
+          ? 'bg-gray-900 text-white border-gray-900'
+          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50',
       )}
     >
-      {label}
+      {children}
     </button>
-  );
-}
-
-function Badge({ label, tone }: { label: string; tone: 'gold' | 'blue' | 'red' | 'orange' }) {
-  const cls =
-    tone === 'gold'
-      ? 'bg-amber-100 text-amber-800 border-amber-200'
-      : tone === 'blue'
-      ? 'bg-blue-100 text-blue-700 border-blue-200'
-      : tone === 'red'
-      ? 'bg-red-100 text-red-700 border-red-200'
-      : 'bg-orange-100 text-orange-700 border-orange-200';
-
-  return (
-    <span className={cn('text-[10px] px-2 py-0.5 rounded-full border', cls)}>
-      {label}
-    </span>
   );
 }
