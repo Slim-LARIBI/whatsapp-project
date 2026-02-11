@@ -1,446 +1,490 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useInboxStore } from '@/store/inbox-store';
 import { api } from '@/lib/api';
+import { cn } from '@/lib/utils';
 import {
   User,
   Phone,
   Mail,
   Tag,
   Bot,
-  TicketPercent,
-  Truck,
-  UserPlus,
-  CheckCircle2,
   Sparkles,
-  ShoppingCart,
-  Package,
-  Wallet,
+  Wand2,
+  ShoppingBag,
+  CreditCard,
+  Truck,
+  ShieldCheck,
 } from 'lucide-react';
 
-interface ConversationDetailProps {
-  conversationId: string;
-}
-
-type OptInStatus = 'opted_in' | 'opted_out' | 'pending';
-type OrderStatus = 'paid' | 'shipped' | 'delivered' | 'refunded';
-
-interface ConvoData {
-  contact?: {
-    name: string;
-    phone: string;
-    email?: string;
-    tags?: string[];
-    optInStatus: OptInStatus;
-  };
-  status: 'open' | 'closed' | 'pending';
+type ConvoData = {
+  id?: string;
+  status?: string;
   aiIntent?: string;
   aiSummary?: string;
 
-  // Optional “segments”
-  segments?: string[]; // ["VIP", "Repeat buyer", "AI: order_issue"]
-}
+  // optional AI layer (mock)
+  aiConfidence?: number; // 0..1
+  aiWhy?: string[];
 
-const MOCK_CONVO: ConvoData = {
-  contact: {
-    name: 'Amira Ben Salah',
-    phone: '+21622123456',
-    email: 'amira@example.com',
-    tags: ['order_issue', 'open'],
-    optInStatus: 'opted_in',
-  },
-  status: 'pending',
-  aiIntent: 'order_issue',
-  aiSummary: 'Problème avec une commande',
-  segments: ['VIP', 'Repeat buyer', 'AI: order_issue'],
-};
-
-const MOCK_COMMERCE = {
-  kpis: { clv: 489, orders: 4, aov: 122 },
-  cart: {
-    status: 'abandoned' as 'active' | 'abandoned' | 'empty',
-    total: 159,
-    updatedAt: '09 Feb, 00:15',
-    items: [
-      { name: 'Shampooing doux', price: 49 },
-      { name: 'Sérum vitamine C', price: 110 },
-    ],
-  },
-  orders: [
-    {
-      id: '#1234',
-      when: '06 févr., 01:00',
-      amount: 89,
-      status: 'delivered' as OrderStatus,
-      items: [{ name: 'Gel douche', price: 44.5 }],
-    },
-    {
-      id: '#1201',
-      when: '19 janv., 01:00',
-      amount: 140,
-      status: 'paid' as OrderStatus,
-      items: [
-        { name: 'Crème hydratante', price: 85 },
-        { name: 'Gommage', price: 55 },
-      ],
-    },
-  ],
-  crossSell: [
-    { id: 'p1', name: 'Hydrating Serum', price: 39, note: 'Pairs well with last purchase' },
-    { id: 'p2', name: 'Gentle Cleanser', price: 29, note: 'Top repeat buy for this segment' },
-    { id: 'p3', name: 'SPF 50 Sunscreen', price: 45, note: 'Frequently bought together' },
-  ],
-};
-
-function pill(base: string, tone: 'gray' | 'green' | 'yellow' | 'red' | 'blue') {
-  const map = {
-    gray: 'bg-gray-100 text-gray-700',
-    green: 'bg-green-100 text-green-700',
-    yellow: 'bg-yellow-100 text-yellow-800',
-    red: 'bg-red-100 text-red-700',
-    blue: 'bg-blue-100 text-blue-700',
+  contact?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    tags?: string[];
+    optInStatus?: 'opted_in' | 'opted_out' | 'pending' | string;
   };
-  return `text-[11px] px-2 py-0.5 rounded-full ${map[tone]} ${base}`;
+
+  // optional commerce mock (future Woo/Presta)
+  commerce?: {
+    lastOrder?: {
+      id: string;
+      total: string;
+      currency: string;
+      status: 'paid' | 'shipped' | 'delivered' | 'refunded' | string;
+      itemsCount: number;
+      createdAt: string;
+    };
+    cart?: {
+      total: string;
+      currency: string;
+      itemsCount: number;
+      updatedAt: string;
+    };
+    clv?: {
+      value: string;
+      currency: string;
+      tier?: 'bronze' | 'silver' | 'gold' | 'vip' | string;
+    };
+  };
+};
+
+function clamp01(n: number) {
+  return Math.max(0, Math.min(1, n));
 }
 
-function consentPill(consent?: OptInStatus) {
-  if (consent === 'opted_in') return 'bg-green-100 text-green-700';
-  if (consent === 'opted_out') return 'bg-red-100 text-red-700';
-  return 'bg-yellow-100 text-yellow-800';
+function pct(n: number) {
+  return Math.round(clamp01(n) * 100);
 }
 
-function orderStatusPill(s: OrderStatus) {
-  if (s === 'delivered') return 'bg-green-100 text-green-700';
-  if (s === 'paid') return 'bg-yellow-100 text-yellow-800';
-  if (s === 'shipped') return 'bg-blue-100 text-blue-700';
-  return 'bg-red-100 text-red-700';
+function intentBadgeColor(intent?: string) {
+  if (!intent) return 'bg-gray-100 text-gray-700 border-gray-200';
+  if (intent.includes('order')) return 'bg-blue-50 text-blue-700 border-blue-200';
+  if (intent.includes('refund') || intent.includes('issue')) return 'bg-red-50 text-red-700 border-red-200';
+  if (intent.includes('shipping')) return 'bg-amber-50 text-amber-800 border-amber-200';
+  if (intent.includes('thanks')) return 'bg-green-50 text-green-700 border-green-200';
+  return 'bg-purple-50 text-purple-700 border-purple-200';
 }
 
-function insertToComposer(text: string) {
-  const textarea = document.querySelector<HTMLTextAreaElement>('textarea');
-  if (!textarea) return;
-  const prev = textarea.value || '';
-  textarea.value = prev.trim() ? `${prev}\n\n${text}` : text;
-  textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  textarea.focus();
+function confidenceColor(p: number) {
+  if (p >= 80) return 'text-green-700 bg-green-50 border-green-200';
+  if (p >= 55) return 'text-amber-800 bg-amber-50 border-amber-200';
+  return 'text-red-700 bg-red-50 border-red-200';
 }
 
-export function ConversationDetail({ conversationId }: ConversationDetailProps) {
+export function ConversationDetail({ conversationId }: { conversationId: string }) {
+  const conversations = useInboxStore((s: any) => s.conversations);
+
+  const storeConvo = useMemo(() => {
+    return (conversations || []).find((c: any) => c.id === conversationId);
+  }, [conversations, conversationId]);
+
   const [data, setData] = useState<ConvoData | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [mockMode, setMockMode] = useState(false);
+
+  // Build a safe mock detail from store conversation (front-only)
+  const mockDetail: ConvoData = useMemo(() => {
+    const firstName =
+      (storeConvo?.contact?.name || storeConvo?.contact?.phone || 'Client')
+        .toString()
+        .split(' ')[0];
+
+    const baseIntent = storeConvo?.aiIntent || 'order_issue';
+    const baseSummary = storeConvo?.aiSummary || 'Client demande de l’aide.';
+
+    // simple deterministic confidence mock
+    const conf =
+      baseIntent === 'order_issue' ? 0.86 :
+      baseIntent === 'shipping' ? 0.78 :
+      baseIntent === 'thanks' ? 0.92 :
+      0.64;
+
+    const why =
+      baseIntent === 'order_issue'
+        ? ['Mot-clé “problème / commande” détecté', 'Historique: dernier achat récent', 'Message entrant non résolu']
+        : baseIntent === 'shipping'
+        ? ['Mot-clé “livraison / tracking” détecté', 'Dernier statut commande = paid', 'Timing < 7 jours']
+        : baseIntent === 'thanks'
+        ? ['Tonalité positive détectée', 'Pas de question explicite', 'Conversation courte']
+        : ['Mots-clés génériques détectés', 'Confiance moyenne', 'Besoin de contexte (commande/panier)'];
+
+    return {
+      id: conversationId,
+      status: storeConvo?.status || 'open',
+      aiIntent: baseIntent,
+      aiSummary: baseSummary,
+      aiConfidence: conf,
+      aiWhy: why,
+      contact: {
+        name: storeConvo?.contact?.name || `${firstName} (mock)`,
+        phone: storeConvo?.contact?.phone || '+216XXXXXXXX',
+        email: storeConvo?.contact?.email,
+        tags: storeConvo?.contact?.tags || (baseIntent ? [baseIntent, 'ecommerce'] : ['ecommerce']),
+        optInStatus: storeConvo?.contact?.optInStatus || 'opted_in',
+      },
+      commerce: {
+        lastOrder: {
+          id: '1234',
+          total: '89',
+          currency: 'TND',
+          status: 'delivered',
+          itemsCount: 2,
+          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(),
+        },
+        cart: {
+          total: '159',
+          currency: 'TND',
+          itemsCount: 3,
+          updatedAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
+        },
+        clv: {
+          value: '420',
+          currency: 'TND',
+          tier: 'gold',
+        },
+      },
+    };
+  }, [conversationId, storeConvo]);
 
   useEffect(() => {
-    let alive = true;
-    setData(null);
-    setUsingMock(false);
+    let mounted = true;
+    setLoading(true);
+    setMockMode(false);
 
-    api.getConversation(conversationId)
-      .then((res) => {
-        if (!alive) return;
-        setData(res as ConvoData);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setUsingMock(true);
-        setData(MOCK_CONVO);
-      });
+    (async () => {
+      try {
+        // Try backend
+        const res = await api.getConversation(conversationId);
+        if (!mounted) return;
+
+        // Normalize minimal fields (backend may not have aiConfidence/aiWhy yet)
+        const normalized: ConvoData = {
+          ...(res as any),
+          id: (res as any)?.id ?? conversationId,
+          status: (res as any)?.status ?? 'open',
+          contact: (res as any)?.contact ?? mockDetail.contact,
+          aiIntent: (res as any)?.aiIntent ?? mockDetail.aiIntent,
+          aiSummary: (res as any)?.aiSummary ?? mockDetail.aiSummary,
+          aiConfidence: (res as any)?.aiConfidence ?? mockDetail.aiConfidence,
+          aiWhy: (res as any)?.aiWhy ?? mockDetail.aiWhy,
+          commerce: (res as any)?.commerce ?? mockDetail.commerce,
+        };
+
+        setData(normalized);
+      } catch (e) {
+        // fallback to mock
+        if (!mounted) return;
+        setMockMode(true);
+        setData(mockDetail);
+      } finally {
+        if (!mounted) return;
+        setLoading(false);
+      }
+    })();
 
     return () => {
-      alive = false;
+      mounted = false;
     };
-  }, [conversationId]);
+  }, [conversationId, mockDetail]);
 
-  const segments = useMemo(() => {
-    const s = data?.segments?.length ? data.segments : [];
-    return s;
-  }, [data]);
+  if (loading) {
+    return (
+      <div className="h-full p-4 text-sm text-gray-400">
+        Loading...
+      </div>
+    );
+  }
 
-  if (!data) return <div className="p-4 text-sm text-gray-400">Loading...</div>;
+  if (!data) {
+    return (
+      <div className="h-full p-4 text-sm text-gray-400">
+        No data
+      </div>
+    );
+  }
+
+  const confidence = typeof data.aiConfidence === 'number' ? pct(data.aiConfidence) : null;
 
   return (
-    <aside className="h-full overflow-y-auto border-l border-gray-200 bg-white">
-      {/* sticky banner */}
-      <div className="sticky top-0 z-10 bg-white border-b border-gray-100 p-3">
-        {usingMock && (
-          <div className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg px-3 py-2">
-            Backend indisponible → mode mock activé (front-only).
-          </div>
-        )}
-      </div>
-
+    <div className="h-full overflow-y-auto">
       <div className="p-4 space-y-4">
-        {/* Top card: identity + quick actions */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-full bg-whatsapp-green text-white flex items-center justify-center font-semibold">
-              {(data.contact?.name?.[0] || data.contact?.phone?.[0] || 'U').toUpperCase()}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold truncate">{data.contact?.name || 'Unknown'}</div>
-                  <div className="text-xs text-gray-500 truncate">{data.contact?.phone || ''}</div>
-                </div>
-
-                <span className={pill('', data.status === 'open' ? 'green' : data.status === 'closed' ? 'gray' : 'yellow')}>
-                  {data.status}
-                </span>
+        {/* Top banner */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold truncate">
+                {data.contact?.name || 'Unknown'}
+              </div>
+              <div className="mt-1 text-xs text-gray-500 truncate">
+                {data.contact?.phone || ''}
               </div>
 
-              {/* Badges */}
-              <div className="mt-2 flex flex-wrap gap-1">
-                {segments.map((s) => (
+              {mockMode && (
+                <div className="mt-2 text-[11px] px-2 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 inline-flex items-center gap-1">
+                  <ShieldCheck size={12} />
+                  Backend indisponible → mode mock activé (front-only).
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col items-end gap-2">
+              <span
+                className={cn(
+                  'text-[10px] px-2 py-1 rounded-full border',
+                  data.status === 'open'
+                    ? 'bg-green-50 text-green-700 border-green-200'
+                    : 'bg-gray-100 text-gray-700 border-gray-200',
+                )}
+              >
+                {data.status || 'open'}
+              </span>
+
+              {data.aiIntent ? (
+                <span
+                  className={cn(
+                    'text-[10px] px-2 py-1 rounded-full border',
+                    intentBadgeColor(data.aiIntent),
+                  )}
+                >
+                  AI: {data.aiIntent}
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Contact quick rows */}
+          <div className="mt-4 grid grid-cols-1 gap-2">
+            <Row icon={<Phone size={14} className="text-gray-400" />} label="Phone" value={data.contact?.phone || '-'} />
+            {data.contact?.email ? (
+              <Row icon={<Mail size={14} className="text-gray-400" />} label="Email" value={data.contact.email} />
+            ) : null}
+          </div>
+
+          {/* Tags */}
+          {data.contact?.tags?.length ? (
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Tags</div>
+              <div className="flex flex-wrap gap-1">
+                {data.contact.tags.map((tag) => (
                   <span
-                    key={s}
-                    className={pill('', s.toLowerCase().includes('vip') ? 'yellow' : s.toLowerCase().includes('repeat') ? 'gray' : 'blue')}
+                    key={tag}
+                    className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-xs flex items-center gap-1 border border-gray-200"
                   >
-                    {s}
+                    <Tag size={10} />
+                    {tag}
                   </span>
                 ))}
               </div>
-
-              {/* Quick actions grid */}
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  className="text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
-                  onClick={() => alert('Mock: Create coupon')}
-                >
-                  <TicketPercent size={14} /> Create coupon
-                </button>
-
-                <button
-                  className="text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
-                  onClick={() => alert('Mock: Resend tracking')}
-                >
-                  <Truck size={14} /> Resend tracking
-                </button>
-
-                <button
-                  className="text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
-                  onClick={() => alert('Mock: Assign agent')}
-                >
-                  <UserPlus size={14} /> Assign agent
-                </button>
-
-                <button
-                  className="text-xs py-2 px-3 rounded-lg bg-green-50 text-green-700 hover:bg-green-100 flex items-center justify-center gap-2"
-                  onClick={() => api.updateConversationStatus(conversationId, 'resolved')}
-                >
-                  <CheckCircle2 size={14} /> Mark resolved
-                </button>
-              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
-        {/* Contact info */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Contact</h3>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <User size={14} className="text-gray-400" />
-              <span>{data.contact?.name || 'Unknown'}</span>
+        {/* AI Insights card */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Bot size={16} className="text-gray-700" />
+              <div className="text-sm font-semibold">AI Insights</div>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Phone size={14} className="text-gray-400" />
-              <span>{data.contact?.phone || ''}</span>
-            </div>
-            {data.contact?.email && (
-              <div className="flex items-center gap-2 text-sm">
-                <Mail size={14} className="text-gray-400" />
-                <span>{data.contact.email}</span>
-              </div>
+
+            {confidence !== null && (
+              <span className={cn('text-[11px] px-2 py-1 rounded-full border', confidenceColor(confidence))}>
+                Confidence: {confidence}%
+              </span>
             )}
-            <div className="pt-2">
-              <span className={`text-xs px-2 py-1 rounded ${consentPill(data.contact?.optInStatus)}`}>
-                {data.contact?.optInStatus || 'pending'}
-              </span>
-            </div>
           </div>
-        </div>
 
-        {/* Tags */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Tags</h3>
-          <div className="flex flex-wrap gap-1">
-            {(data.contact?.tags?.length ? data.contact.tags : ['order_issue', data.status]).map((tag) => (
-              <span key={tag} className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs flex items-center gap-1">
-                <Tag size={10} />
-                {tag}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* AI */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-            <Bot size={12} /> AI Insights
-          </h3>
-          {data.aiIntent ? (
-            <p className="text-xs">
-              <span className="font-medium">Intent:</span>{' '}
-              <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{data.aiIntent}</span>
+          {data.aiSummary ? (
+            <p className="mt-3 text-sm text-gray-700 leading-relaxed">
+              {data.aiSummary}
             </p>
           ) : (
-            <p className="text-xs text-gray-500">No intent detected</p>
+            <p className="mt-3 text-sm text-gray-400">No AI summary.</p>
           )}
-          {data.aiSummary && <p className="text-xs text-gray-600 mt-2">{data.aiSummary}</p>}
 
-          <button
-            className="mt-3 w-full text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
-            onClick={() => insertToComposer('✨ Proposition IA : pouvez-vous préciser votre numéro de commande ?')}
-          >
-            <Sparkles size={14} /> AI quick reply
-          </button>
-        </div>
-
-        {/* Commerce KPIs */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Commerce (mock)</h3>
-
-          <div className="grid grid-cols-3 gap-2">
-            <MiniKpi icon={<Wallet size={14} className="text-gray-400" />} label="CLV" value={`${MOCK_COMMERCE.kpis.clv} TND`} />
-            <MiniKpi icon={<Package size={14} className="text-gray-400" />} label="Orders" value={`${MOCK_COMMERCE.kpis.orders}`} />
-            <MiniKpi icon={<ShoppingCart size={14} className="text-gray-400" />} label="AOV" value={`${MOCK_COMMERCE.kpis.aov} TND`} />
-          </div>
-
-          {/* Cart */}
-          <div className="mt-3 border border-gray-100 rounded-lg p-3">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-semibold">Cart</div>
-              <span className={pill('', MOCK_COMMERCE.cart.status === 'abandoned' ? 'yellow' : MOCK_COMMERCE.cart.status === 'active' ? 'green' : 'gray')}>
-                {MOCK_COMMERCE.cart.status}
-              </span>
+          {/* Confidence bar */}
+          {confidence !== null && (
+            <div className="mt-3">
+              <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-whatsapp-green"
+                  style={{ width: `${confidence}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-gray-500">
+                {confidence >= 80
+                  ? 'High confidence → suggest automation or template.'
+                  : confidence >= 55
+                  ? 'Medium confidence → ask for order/cart context.'
+                  : 'Low confidence → collect more info first.'}
+              </div>
             </div>
-            <div className="text-sm font-semibold mt-1">{MOCK_COMMERCE.cart.total} TND</div>
-            <div className="text-xs text-gray-500">Updated: {MOCK_COMMERCE.cart.updatedAt}</div>
+          )}
 
-            <div className="mt-2 space-y-1">
-              {MOCK_COMMERCE.cart.items.map((it) => (
-                <div key={it.name} className="flex items-center justify-between text-xs">
-                  <span className="text-gray-700 truncate">{it.name}</span>
-                  <span className="text-gray-500">{it.price} TND</span>
-                </div>
-              ))}
+          {/* Why list */}
+          {Array.isArray(data.aiWhy) && data.aiWhy.length > 0 && (
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-2">
+                <Sparkles size={14} className="text-gray-500" /> Why (mock)
+              </div>
+              <ul className="space-y-2">
+                {data.aiWhy.slice(0, 4).map((w, idx) => (
+                  <li key={idx} className="text-sm text-gray-700 flex gap-2">
+                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-gray-400 shrink-0" />
+                    <span>{w}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
+          )}
 
+          {/* CTA */}
+          <div className="mt-4 flex gap-2">
             <button
-              className="mt-3 w-full text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50"
-              onClick={() =>
-                insertToComposer(
-                  `Bonjour 👋\n\nOn a remarqué que votre panier (${MOCK_COMMERCE.cart.total} TND) est toujours en attente.\nSouhaitez-vous que je vous aide à finaliser la commande ?`
-                )
-              }
+              onClick={() => alert('Mock: Create automation from intent (Sprint next)')}
+              className="flex-1 text-xs py-2 px-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
             >
-              Send cart reminder
+              <Wand2 size={14} />
+              Create automation from intent
+            </button>
+            <button
+              onClick={() => alert('Mock: Apply template suggestion (already in Inbox templates)')}
+              className="flex-1 text-xs py-2 px-3 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+            >
+              <Sparkles size={14} />
+              Suggest template
             </button>
           </div>
         </div>
 
-        {/* Recent orders */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Recent orders</h3>
-          <div className="space-y-2">
-            {MOCK_COMMERCE.orders.map((o) => (
-              <div key={o.id} className="border border-gray-100 rounded-lg p-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">{o.id}</div>
-                  <div className="text-sm font-semibold">{o.amount} TND</div>
-                </div>
-                <div className="flex items-center justify-between mt-1">
-                  <div className="text-xs text-gray-500">{o.when}</div>
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${orderStatusPill(o.status)}`}>{o.status}</span>
-                </div>
+        {/* Commerce card (future Woo/Presta) */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2">
+            <ShoppingBag size={16} className="text-gray-700" />
+            <div className="text-sm font-semibold">Commerce</div>
+            <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full border bg-gray-50 text-gray-700 border-gray-200">
+              Mock
+            </span>
+          </div>
 
-                <div className="mt-2 space-y-1">
-                  {o.items.map((it) => (
-                    <div key={it.name} className="flex items-center justify-between text-xs">
-                      <span className="text-gray-700 truncate">{it.name}</span>
-                      <span className="text-gray-500">{it.price} TND</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-2 flex gap-2">
-                  <button
-                    className="text-xs py-1.5 px-2 rounded-md border border-gray-200 hover:bg-gray-50"
-                    onClick={() => insertToComposer(`Pouvez-vous confirmer votre commande ${o.id} ?`)}
-                  >
-                    View
-                  </button>
-                  <button
-                    className="text-xs py-1.5 px-2 rounded-md border border-gray-200 hover:bg-gray-50"
-                    onClick={() => insertToComposer(`Je peux vous proposer une offre liée à votre commande ${o.id}. Ça vous dit ?`)}
-                  >
-                    Send promo
-                  </button>
+          <div className="mt-3 grid grid-cols-1 gap-3">
+            {/* Last order */}
+            <div className="rounded-xl border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-gray-500 uppercase">Last order</div>
+                <div className="text-xs text-gray-500 flex items-center gap-1">
+                  <Truck size={14} className="text-gray-400" />
+                  {data.commerce?.lastOrder?.status || '—'}
                 </div>
               </div>
-            ))}
+
+              {data.commerce?.lastOrder ? (
+                <div className="mt-2">
+                  <div className="text-sm font-medium">
+                    #{data.commerce.lastOrder.id} • {data.commerce.lastOrder.total} {data.commerce.lastOrder.currency}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    {data.commerce.lastOrder.itemsCount} item(s)
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-400">No order data.</div>
+              )}
+            </div>
+
+            {/* Cart */}
+            <div className="rounded-xl border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-gray-500 uppercase">Cart</div>
+                <div className="text-xs text-gray-500 flex items-center gap-1">
+                  <CreditCard size={14} className="text-gray-400" />
+                  {data.commerce?.cart?.itemsCount ?? 0} items
+                </div>
+              </div>
+
+              {data.commerce?.cart ? (
+                <div className="mt-2">
+                  <div className="text-sm font-medium">
+                    {data.commerce.cart.total} {data.commerce.cart.currency}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    Updated recently
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-400">No cart data.</div>
+              )}
+            </div>
+
+            {/* CLV */}
+            <div className="rounded-xl border border-gray-200 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-gray-500 uppercase">CLV</div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-200">
+                  {data.commerce?.clv?.tier || 'tier'}
+                </span>
+              </div>
+
+              {data.commerce?.clv ? (
+                <div className="mt-2 text-sm font-medium">
+                  {data.commerce.clv.value} {data.commerce.clv.currency}
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-400">No CLV data.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 text-xs text-gray-500">
+            Sprint suivant: brancher Woo/Presta → auto-fill order/cart/CLV par phone match.
           </div>
         </div>
 
-        {/* Cross-sell */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Cross-sell</h3>
-          <div className="space-y-2">
-            {MOCK_COMMERCE.crossSell.map((p) => (
-              <div key={p.id} className="border border-gray-100 rounded-lg p-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">{p.name}</div>
-                  <div className="text-sm font-semibold">{p.price} TND</div>
-                </div>
-                <div className="text-xs text-gray-500 mt-0.5">{p.note}</div>
-
-                <button
-                  className="mt-2 w-full text-xs py-2 px-3 bg-whatsapp-green text-white rounded-lg hover:bg-whatsapp-dark transition-colors"
-                  onClick={() =>
-                    insertToComposer(
-                      `Bonjour 👋\n\n✨ ${p.name} — ${p.price} TND\n${p.note}\n\nSouhaitez-vous que je vous l’ajoute ?`
-                    )
-                  }
-                >
-                  Insert offer in composer
-                </button>
-              </div>
-            ))}
+        {/* Actions */}
+        <div className="rounded-2xl border border-gray-200 bg-white p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Actions</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => api.updateConversationStatus(conversationId, 'resolved')}
+              className="text-xs py-2 px-3 bg-green-50 text-green-700 rounded-xl hover:bg-green-100 transition-colors"
+            >
+              Mark as Resolved
+            </button>
+            <button
+              onClick={() => api.updateConversationStatus(conversationId, 'closed')}
+              className="text-xs py-2 px-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors"
+            >
+              Close
+            </button>
           </div>
-        </div>
-
-        {/* Internal note */}
-        <div className="border border-gray-200 rounded-xl p-3 bg-white">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Internal note</h3>
-          <textarea
-            placeholder="Write a private note for the team..."
-            className="w-full min-h-[90px] resize-none rounded-lg border border-gray-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-whatsapp-green"
-          />
-          <button className="w-full mt-2 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm">
-            Save note
-          </button>
         </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
-function MiniKpi({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
+function Row({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="border border-gray-200 rounded-lg p-2">
-      <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 text-sm">
+      <div className="w-7 h-7 rounded-lg bg-gray-50 border border-gray-200 flex items-center justify-center">
         {icon}
-        <div className="text-[11px] text-gray-500">{label}</div>
       </div>
-      <div className="text-sm font-semibold mt-1">{value}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-gray-500">{label}</div>
+        <div className="text-sm text-gray-800 truncate">{value}</div>
+      </div>
     </div>
   );
 }
