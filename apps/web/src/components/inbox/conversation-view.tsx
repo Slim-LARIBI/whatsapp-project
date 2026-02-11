@@ -144,17 +144,16 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
     return (conversations || []).find((c: any) => c.id === conversationId);
   }, [conversations, conversationId]);
 
-  // Si ton store mock gère les messages au selectConversation, setMessages peut être absent.
+  // reset / sync messages when switching conversation
   useEffect(() => {
-    // sécurité: si setMessages existe et qu'on veut reset quand on change de convo
     if (typeof setMessages === 'function') setMessages(messages ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // Auto-scroll
+  // Auto-scroll (on new messages or change convo)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, conversationId]);
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -178,14 +177,12 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
   }, [tplSearch, tplCategory]);
 
   const onInsertTemplate = (t: Template) => {
-    // variables: on peut enrichir avec le contact name si dispo
     const vars = {
       ...MOCK_VARS,
       first_name: convo?.contact?.name?.split(' ')?.[0] || MOCK_VARS.first_name,
     };
     const filled = fillVars(t.body, vars);
 
-    // Insert dans le champ (sans envoyer)
     setInput((prev) => (prev?.trim() ? prev + '\n\n' + filled : filled));
     setTplOpen(false);
   };
@@ -196,17 +193,10 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
     setSending(true);
 
     try {
-      /**
-       * MODE MOCK:
-       * - Si ton store addMessage attend un string => addMessage("hello")
-       * - Si ton store addMessage attend un objet Message => addMessage({ ... })
-       */
       if (typeof addMessageStore === 'function') {
-        // essaie string (mock store actuel chez toi)
         try {
           addMessageStore(body);
         } catch {
-          // fallback objet
           addMessageStore({
             id: Math.random().toString(36).slice(2),
             direction: 'out',
@@ -231,9 +221,10 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col relative">
-      {/* Header */}
-      <div className="h-14 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
+    // ✅ Important: h-full + min-h-0 to allow middle scroll, and relative for drawer overlay
+    <div className="relative flex h-full min-h-0 flex-col">
+      {/* ✅ Header fixed (top) */}
+      <div className="shrink-0 h-14 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
         <div className="min-w-0">
           <div className="font-medium text-sm truncate">{convo?.contact?.name || 'Conversation'}</div>
           <div className="text-xs text-gray-400">{convo?.contact?.phone || ''}</div>
@@ -250,7 +241,6 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
           <button
             onClick={() => {
-              // mock "AI reply"
               const suggestion =
                 `Bonjour ${convo?.contact?.name?.split(' ')?.[0] || '👋'}, ` +
                 `je m’en occupe. Pouvez-vous me partager votre numéro de commande ?`;
@@ -264,37 +254,41 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50">
-        {(messages || []).map((msg: any) => {
-          const dir = msg.direction;
-          const inbound = dir === 'in' || dir === 'inbound';
-          const outbound = dir === 'out' || dir === 'outbound';
-          return (
-            <div
-              key={msg.id}
-              className={cn(
-                'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
-                inbound ? 'bg-white border border-gray-200 mr-auto' : '',
-                outbound ? 'bg-whatsapp-light ml-auto' : '',
-              )}
-            >
-              {msg.content?.body && <p className="whitespace-pre-wrap">{msg.content.body}</p>}
+      {/* ✅ Messages area (scroll only here) */}
+      <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50">
+        <div className="p-4 space-y-2">
+          {(messages || []).map((msg: any) => {
+            const dir = msg.direction;
+            const inbound = dir === 'in' || dir === 'inbound';
+            const outbound = dir === 'out' || dir === 'outbound';
 
-              <div className="flex items-center justify-end gap-1 mt-1">
-                <span className="text-[10px] text-gray-400">
-                  {msg.createdAt ? format(new Date(msg.createdAt), 'HH:mm') : ''}
-                </span>
-                {outbound && <StatusIcon status={msg.status} />}
+            return (
+              <div
+                key={msg.id}
+                className={cn(
+                  'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
+                  inbound ? 'bg-white border border-gray-200 mr-auto' : '',
+                  outbound ? 'bg-whatsapp-light ml-auto' : '',
+                )}
+              >
+                {msg.content?.body && <p className="whitespace-pre-wrap">{msg.content.body}</p>}
+
+                <div className="flex items-center justify-end gap-1 mt-1">
+                  <span className="text-[10px] text-gray-400">
+                    {msg.createdAt ? format(new Date(msg.createdAt), 'HH:mm') : ''}
+                  </span>
+                  {outbound && <StatusIcon status={msg.status} />}
+                </div>
               </div>
-            </div>
-          );
-        })}
-        <div ref={messagesEndRef} />
+            );
+          })}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Composer + quick actions */}
-      <div className="border-t border-gray-200 bg-white">
+      {/* ✅ Composer fixed (bottom) */}
+      <div className="shrink-0 border-t border-gray-200 bg-white">
+        {/* quick actions */}
         <div className="px-3 pt-3 pb-2 flex gap-2 flex-wrap">
           <button
             onClick={() => setTplOpen(true)}
@@ -302,6 +296,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
           >
             <FileText size={14} /> Templates
           </button>
+
           <button
             onClick={() => {
               const tagLine = '[Tag]';
@@ -311,6 +306,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
           >
             Add tag
           </button>
+
           <button
             onClick={() => {
               const line = `Order #${MOCK_VARS.order_id} — ${MOCK_VARS.order_total} TND`;
@@ -322,6 +318,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
           </button>
         </div>
 
+        {/* input */}
         <div className="p-3 pt-2">
           <div className="flex items-end gap-2">
             <textarea
@@ -348,18 +345,12 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
       {tplOpen && (
         <div className="absolute inset-0 z-50">
           {/* overlay */}
-          <div
-            className="absolute inset-0 bg-black/20"
-            onClick={() => setTplOpen(false)}
-          />
+          <div className="absolute inset-0 bg-black/20" onClick={() => setTplOpen(false)} />
           {/* panel */}
           <div className="absolute right-0 top-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-xl flex flex-col">
             <div className="h-14 px-4 border-b border-gray-200 flex items-center justify-between">
               <div className="font-semibold text-sm">Templates</div>
-              <button
-                onClick={() => setTplOpen(false)}
-                className="p-2 rounded-lg hover:bg-gray-50"
-              >
+              <button onClick={() => setTplOpen(false)} className="p-2 rounded-lg hover:bg-gray-50">
                 <X size={18} />
               </button>
             </div>
@@ -448,15 +439,14 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
               })}
 
               {filteredTemplates.length === 0 && (
-                <div className="text-sm text-gray-400 text-center py-10">
-                  No templates found.
-                </div>
+                <div className="text-sm text-gray-400 text-center py-10">No templates found.</div>
               )}
             </div>
 
             <div className="p-3 border-t border-gray-200 bg-white">
               <div className="text-xs text-gray-500">
-                Variables mock: <code className="px-1 py-0.5 bg-gray-100 rounded">first_name</code>,{' '}
+                Variables mock:{' '}
+                <code className="px-1 py-0.5 bg-gray-100 rounded">first_name</code>,{' '}
                 <code className="px-1 py-0.5 bg-gray-100 rounded">cart_total</code>,{' '}
                 <code className="px-1 py-0.5 bg-gray-100 rounded">coupon_code</code>,{' '}
                 <code className="px-1 py-0.5 bg-gray-100 rounded">order_id</code>, etc.
