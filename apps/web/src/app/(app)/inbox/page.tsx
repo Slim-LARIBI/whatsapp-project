@@ -2,9 +2,18 @@
 
 import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
+
 import { ConversationList } from '@/components/inbox/conversation-list';
 import { ConversationView } from '@/components/inbox/conversation-view';
+import { ConversationDetail } from '@/components/inbox/conversation-detail';
 import { useInboxStore } from '@/store/inbox-store';
+
+/**
+ * INBOX STABLE (SAFE)
+ * - 3 colonnes FIXES
+ * - Seule la zone messages scrolle (ConversationView gère déjà sticky header/composer)
+ * - Ne casse pas templates drawer / AI reply
+ */
 
 const TEMPLATE_LIBRARY: Record<string, string> = {
   order_confirmation:
@@ -39,12 +48,11 @@ export default function InboxPage() {
   useEffect(() => {
     if (!tpl || !templateText) return;
 
-    // 1) auto-select first conversation if none selected
+    // auto-select first conversation if none selected
     if (!selectedConversationId && conversations.length > 0) {
       selectConversation(conversations[0].id);
     }
 
-    // 2) put template into composer (append to keep agent's draft if any)
     const filled = templateText
       .replaceAll('{{first_name}}', 'Amira')
       .replaceAll('{{order_id}}', '1234')
@@ -58,31 +66,46 @@ export default function InboxPage() {
       .replaceAll('{{code}}', 'SAVE10')
       .replaceAll('{{ends_at}}', '2026-02-28');
 
+    // push template into composer
     setComposerDraft('');
     appendComposerDraft(filled);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tpl, templateText]);
 
   return (
-    // IMPORTANT: lock the inbox area in a horizontal flex row and prevent page scroll jumps
-    <div className="flex h-full min-h-0 w-full overflow-hidden">
-      {/* LEFT: list (scrolls inside) */}
-      <aside className="w-[380px] shrink-0 border-r border-gray-200 bg-white overflow-y-auto">
-        <ConversationList />
+    <div className="flex h-full w-full overflow-hidden">
+      {/* LEFT: conversations */}
+      <aside className="w-[380px] shrink-0 border-r border-gray-200 bg-white overflow-hidden">
+        <div className="h-full overflow-y-auto">
+          <ConversationList />
+        </div>
       </aside>
 
-      {/* CENTER: conversation view (scrolls inside) */}
-      <section className="flex-1 min-w-0 min-h-0 bg-white">
-        <div className="h-full min-h-0 overflow-y-auto">
+      {/* CENTER: chat */}
+      <main className="flex-1 min-w-0 bg-white overflow-hidden">
+        <div className="h-full flex flex-col overflow-hidden">
           {selectedConversationId ? (
             <ConversationView conversationId={selectedConversationId} />
           ) : (
-            <div className="h-full flex items-center justify-center text-gray-400">
+            <div className="flex-1 flex items-center justify-center text-gray-400">
               Select a conversation
             </div>
           )}
         </div>
-      </section>
+      </main>
+
+      {/* RIGHT: details */}
+      <aside className="w-[380px] shrink-0 border-l border-gray-200 bg-white overflow-hidden">
+        <div className="h-full overflow-y-auto">
+          {selectedConversationId ? (
+            <ConversationDetail conversationId={selectedConversationId} />
+          ) : (
+            <div className="p-4 text-sm text-gray-400">
+              No conversation selected
+            </div>
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
