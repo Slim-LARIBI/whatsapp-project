@@ -21,8 +21,14 @@ import { WebhookModule } from './modules/webhook/webhook.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.get('DATABASE_URL'),
-        entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: false, // use migrations
+
+        // ✅ IMPORTANT: charge automatiquement les Entities déclarées dans les modules (forFeature)
+        autoLoadEntities: true,
+
+        // ✅ DEV only: crée les tables automatiquement (sinon ta DB reste vide)
+        // Mets false + migrations quand tu passes en prod
+        synchronize: true,
+
         logging: config.get('NODE_ENV') === 'development',
       }),
     }),

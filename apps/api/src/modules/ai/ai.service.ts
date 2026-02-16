@@ -133,7 +133,7 @@ Summary:`;
       throw new Error('AI provider error');
     }
 
-    const result = await response.json();
-    return result.choices[0].message.content;
+    const result = (await response.json()) as any;
+return result?.choices?.[0]?.message?.content ?? '';
   }
 }

@@ -1,162 +1,175 @@
 "use client";
 
-import React from "react";
-import { cn } from "@/lib/utils";
-import { ShoppingBag, CreditCard, Package, Flame, Tag, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useInboxStore } from "@/store/inbox-store";
+import { ShoppingBag, CreditCard, Truck, AlertTriangle } from "lucide-react";
+
+type WooOrder = {
+  id: number;
+  number: string;
+  status: string;
+  currency: string;
+  total: string;
+  date_created: string;
+  payment_method_title?: string;
+  billing?: {
+    first_name?: string;
+    last_name?: string;
+    phone?: string;
+    email?: string;
+  };
+  line_items: { id: number; name: string; quantity: number; total: string }[];
+};
+
+function money(total: string, currency: string) {
+  const n = Number(total || 0);
+  if (Number.isNaN(n)) return `${total} ${currency}`;
+  return `${n.toFixed(2)} ${currency}`;
+}
 
 export default function CustomerCommercePanel() {
-  const lastOrder = {
-    id: "1234",
-    total: 89,
-    currency: "TND",
-    status: "Delivered",
-    date: "2026-02-09",
-    items: [
-      { name: "Hydrating Serum", qty: 1, price: 39 },
-      { name: "SPF 50 Sunscreen", qty: 1, price: 50 },
-    ],
-  };
+  const selectedConversationId = useInboxStore((s: any) => s.selectedConversationId);
+  const conversations = useInboxStore((s: any) => s.conversations);
 
-  const clv = { totalSpent: 420, orders: 7, aov: 60, segment: "VIP" };
+  const convo = useMemo(() => {
+    return (conversations || []).find((c: any) => c.id === selectedConversationId);
+  }, [conversations, selectedConversationId]);
 
-  const abandonedCart = {
-    updatedAt: "Today",
-    items: [
-      { name: "Cleansing Gel", qty: 1, price: 25 },
-      { name: "Moisturizer", qty: 1, price: 34 },
-    ],
-    total: 59,
-    currency: "TND",
-  };
+  const phone = convo?.contact?.phone || "";
+  const name = convo?.contact?.name || "Customer";
 
-  const suggestions = [
-    { title: "Cross-sell", badge: "Best match", desc: "Add: Travel-size kit (-10%)", icon: TrendingUp },
-    { title: "Upsell", badge: "High intent", desc: "Upgrade to bundle (save 12%)", icon: Flame },
-    { title: "Promo", badge: "Active", desc: "Code SAVE10 until 2026-02-28", icon: Tag },
+  const [loading, setLoading] = useState(false);
+  const [orders, setOrders] = useState<WooOrder[]>([]);
+  const [error, setError] = useState<string>("");
+
+  // ✅ Mock fallback (si Woo ne renvoie rien)
+  const mockOrders: WooOrder[] = [
+    {
+      id: 1001,
+      number: "1234",
+      status: "completed",
+      currency: "TND",
+      total: "89",
+      date_created: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
+      payment_method_title: "Card",
+      billing: { first_name: "Amira", phone },
+      line_items: [
+        { id: 1, name: "Shampoo", quantity: 1, total: "25" },
+        { id: 2, name: "Serum", quantity: 1, total: "64" },
+      ],
+    },
   ];
+
+  useEffect(() => {
+    if (!phone) return;
+
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const r = await fetch(`/api/woo/orders?phone=${encodeURIComponent(phone)}&limit=5`, {
+          cache: "no-store",
+        });
+        const j = await r.json();
+
+        if (cancelled) return;
+
+        if (!r.ok || !j?.ok) {
+          // On garde un mode safe : pas de crash, juste fallback mock
+          setError("Woo backend indisponible → fallback mock.");
+          setOrders(mockOrders);
+          return;
+        }
+
+        const list: WooOrder[] = Array.isArray(j.orders) ? j.orders : [];
+        // si Woo renvoie 0, fallback mock (le temps d’avoir A2)
+        setOrders(list.length ? list : mockOrders);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError("Fetch Woo failed → fallback mock.");
+        setOrders(mockOrders);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phone]);
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold truncate">Commerce</div>
-          <div className="text-xs text-gray-500 truncate">Mock panel · API-ready</div>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold">Commerce</div>
+          <div className="text-xs text-gray-500">
+            {name} · <span className="font-mono">{phone || "No phone"}</span>
+          </div>
         </div>
-        <span className="text-[10px] px-2 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">
-          Mock
-        </span>
+        <div className="text-xs text-gray-400">{loading ? "Loading..." : ""}</div>
       </div>
 
-      <Card title="Customer value" icon={CreditCard}>
-        <div className="grid grid-cols-3 gap-2">
-          <Stat label="Total spent" value={`${clv.totalSpent} TND`} />
-          <Stat label="Orders" value={`${clv.orders}`} />
-          <Stat label="AOV" value={`${clv.aov} TND`} />
+      {error && (
+        <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 flex items-start gap-2">
+          <AlertTriangle size={14} className="mt-0.5" />
+          <div>{error}</div>
         </div>
-        <div className="mt-2 text-xs text-gray-600">
-          Segment: <span className="font-medium">{clv.segment}</span>
-        </div>
-      </Card>
+      )}
 
-      <Card title={`Last order #${lastOrder.id}`} icon={ShoppingBag}>
-        <div className="flex items-center justify-between text-xs text-gray-600">
-          <span>{lastOrder.date}</span>
-          <span className="px-2 py-0.5 rounded-full bg-gray-100 border text-gray-700">{lastOrder.status}</span>
+      <div className="rounded-xl border border-gray-200 bg-white p-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ShoppingBag size={16} />
+          Recent orders
         </div>
 
-        <div className="mt-3 space-y-2">
-          {lastOrder.items.map((it) => (
-            <div key={it.name} className="flex items-center justify-between text-sm">
-              <div className="truncate">
-                <span className="font-medium">{it.qty}×</span> {it.name}
+        <div className="mt-3 space-y-3">
+          {orders.map((o) => (
+            <div key={o.id} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold">Order #{o.number}</div>
+                <span className="text-[11px] px-2 py-1 rounded-full bg-white border border-gray-200 text-gray-700">
+                  {o.status}
+                </span>
               </div>
-              <div className="text-gray-700">{it.price} TND</div>
+
+              <div className="mt-1 text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
+                <span className="inline-flex items-center gap-1">
+                  <CreditCard size={12} /> {o.payment_method_title || "—"}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Truck size={12} /> {new Date(o.date_created).toLocaleDateString()}
+                </span>
+                <span className="font-semibold">{money(o.total, o.currency)}</span>
+              </div>
+
+              {o.line_items?.length ? (
+                <div className="mt-2 text-xs text-gray-700">
+                  <div className="font-medium mb-1">Items</div>
+                  <ul className="space-y-1">
+                    {o.line_items.map((li) => (
+                      <li key={li.id} className="flex items-center justify-between">
+                        <span className="truncate">{li.name} × {li.quantity}</span>
+                        <span className="text-gray-600">{li.total}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
-
-        <div className="mt-3 flex items-center justify-between border-t pt-3">
-          <div className="text-xs text-gray-500">Total</div>
-          <div className="text-sm font-semibold">{lastOrder.total} {lastOrder.currency}</div>
-        </div>
-      </Card>
-
-      <Card title="Abandoned cart" icon={Package}>
-        <div className="flex items-center justify-between text-xs text-gray-600">
-          <span>Updated: {abandonedCart.updatedAt}</span>
-          <span className="px-2 py-0.5 rounded-full bg-yellow-50 border border-yellow-200 text-yellow-800">Hot</span>
-        </div>
-
-        <div className="mt-3 space-y-2">
-          {abandonedCart.items.map((it) => (
-            <div key={it.name} className="flex items-center justify-between text-sm">
-              <div className="truncate">
-                <span className="font-medium">{it.qty}×</span> {it.name}
-              </div>
-              <div className="text-gray-700">{it.price} TND</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 flex items-center justify-between border-t pt-3">
-          <div className="text-xs text-gray-500">Total</div>
-          <div className="text-sm font-semibold">{abandonedCart.total} {abandonedCart.currency}</div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button className="rounded-lg border px-3 py-2 text-xs hover:bg-gray-50">
-            Send reminder (mock)
-          </button>
-          <button className="rounded-lg bg-green-600 text-white px-3 py-2 text-xs hover:bg-green-700">
-            Offer discount (mock)
-          </button>
-        </div>
-      </Card>
-
-      <Card title="Suggestions" icon={Flame}>
-        <div className="space-y-2">
-          {suggestions.map((s) => {
-            const I = s.icon;
-            return (
-              <div key={s.title} className="flex gap-3 rounded-xl border p-3 hover:bg-gray-50">
-                <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center">
-                  <I size={18} className="text-gray-700" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">{s.title}</div>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 border text-gray-700">{s.badge}</span>
-                  </div>
-                  <div className="text-xs text-gray-600 mt-0.5">{s.desc}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function Card({ title, icon: Icon, children }: { title: string; icon: any; children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-      <div className="px-4 py-3 border-b flex items-center gap-2">
-        <div className="w-8 h-8 rounded-xl bg-gray-100 flex items-center justify-center">
-          <Icon size={16} className="text-gray-700" />
-        </div>
-        <div className="text-sm font-semibold">{title}</div>
       </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
-}
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={cn("rounded-xl border bg-gray-50 px-3 py-2")}>
-      <div className="text-[11px] text-gray-500">{label}</div>
-      <div className="text-sm font-semibold">{value}</div>
+      <div className="rounded-xl border border-gray-200 bg-white p-3">
+        <div className="text-sm font-medium">CLV (mock)</div>
+        <div className="mt-1 text-xs text-gray-600">
+          Orders: <b>{orders.length}</b> · Estimated CLV: <b>420 TND</b> · Segment: <b>Warm</b>
+        </div>
+      </div>
     </div>
   );
 }

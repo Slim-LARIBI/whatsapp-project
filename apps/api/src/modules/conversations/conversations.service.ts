@@ -18,28 +18,34 @@ export class ConversationsService {
     private readonly sendQueue: Queue,
   ) {}
 
-  async findAll(tenantId: string, query: {
-    page?: number;
-    limit?: number;
-    status?: string;
-    assignedTo?: string;
-  }) {
+   async findAll(
+    tenantId: string,
+    query: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      assignedTo?: string;
+    },
+  ) {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(query.limit || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
-    const qb = this.convoRepo.createQueryBuilder('c')
-      .where('c.tenant_id = :tenantId', { tenantId })
+    const qb = this.convoRepo
+      .createQueryBuilder('c')
+      // IMPORTANT: utiliser les propriétés de l'entity (camelCase), pas les colonnes SQL (snake_case)
+      .where('c.tenantId = :tenantId', { tenantId })
       .leftJoinAndSelect('c.contact', 'contact')
       .leftJoinAndSelect('c.assignee', 'assignee');
 
     if (query.status) {
       qb.andWhere('c.status = :status', { status: query.status });
     }
+
     if (query.assignedTo) {
-      qb.andWhere('c.assigned_to = :assignedTo', { assignedTo: query.assignedTo });
+      qb.andWhere('c.assignedTo = :assignedTo', { assignedTo: query.assignedTo });
     }
 
-    qb.orderBy('c.last_message_at', 'DESC', 'NULLS LAST')
+    qb.orderBy('c.lastMessageAt', 'DESC', 'NULLS LAST')
       .skip((page - 1) * limit)
       .take(limit);
 

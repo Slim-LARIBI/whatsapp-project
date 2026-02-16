@@ -8,6 +8,9 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { TemplatesModule } from '../templates/templates.module';
 import { QUEUE_AI_CLASSIFY, QUEUE_WEBHOOK_NOTIFY } from '@whatsapp-platform/shared';
 
+// ✅ AJOUTE CET IMPORT (chemin probable)
+import { ConversationsGateway } from '../conversations/conversations.gateway';
+
 @Module({
   imports: [
     ContactsModule,
@@ -20,6 +23,7 @@ import { QUEUE_AI_CLASSIFY, QUEUE_WEBHOOK_NOTIFY } from '@whatsapp-platform/shar
     ),
   ],
   controllers: [WebhookController],
-  providers: [WebhookService],
+  // ✅ AJOUTE ConversationsGateway ici
+  providers: [WebhookService, ConversationsGateway],
 })
 export class WebhookModule {}
