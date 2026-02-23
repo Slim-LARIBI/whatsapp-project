@@ -12,3 +12,13 @@ venv
 __pycache__/
 *.pyc
 .turbo/
+
+# secrets / tokens
+github_pat_*
+*.pem
+*.key
+
+# local caches
+.pnpm-store/
+.env
+.env.*
