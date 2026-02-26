@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
+// ⚠️ Ajuste le chemin si ton entity s'appelle autrement
 import { WhatsappAccount } from './whatsapp-account.entity';
-import { WA_API_BASE } from '@whatsapp-platform/shared';
 
 @Injectable()
 export class WhatsappService {
@@ -10,146 +11,156 @@ export class WhatsappService {
 
   constructor(
     @InjectRepository(WhatsappAccount)
-    private readonly waAccountRepo: Repository<WhatsappAccount>,
+    private readonly waRepo: Repository<WhatsappAccount>,
   ) {}
 
-  async getAccount(tenantId: string, waAccountId: string) {
-    return this.waAccountRepo.findOne({
-      where: { id: waAccountId, tenantId },
-    });
-  }
-
-  async getAccountByPhoneNumberId(phoneNumberId: string) {
-    return this.waAccountRepo.findOne({
-      where: { phoneNumberId },
-    });
-  }
-
-  /**
-   * Send a free-form text message via WhatsApp Cloud API.
-   */
-  async sendTextMessage(waAccount: WhatsappAccount, to: string, body: string): Promise<{ waMessageId: string }> {
-    const url = `${WA_API_BASE}/${waAccount.phoneNumberId}/messages`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${waAccount.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to,
-        type: 'text',
-        text: { body },
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      this.logger.error(`WA API error: ${JSON.stringify(error)}`);
-      throw new Error(`WhatsApp API error: ${error.error?.message || 'Unknown'}`);
+  /* =========================
+     Helpers
+  ========================= */
+  private async safeJson(res: Response): Promise<any> {
+    try {
+      return (await res.json()) as any;
+    } catch {
+      return null;
     }
-
-    const result = await response.json();
-    return { waMessageId: result.messages?.[0]?.id };
   }
 
-  /**
-   * Send a template message via WhatsApp Cloud API.
-   */
+  private graphUrl(path: string) {
+    return `https://graph.facebook.com/v20.0${path.startsWith('/') ? path : `/${path}`}`;
+  }
+
+  /* =========================
+     Accounts
+  ========================= */
+
+  // ✅ Utilisé par TemplatesService (tenant + waAccountId)
+  async getAccount(tenantId: string, waAccountId: string): Promise<WhatsappAccount | null> {
+    return this.waRepo.findOne({ where: { id: waAccountId, tenantId } as any });
+  }
+
+  // ✅ FIX build: webhook.service.ts appelle ça
+  async getAccountByPhoneNumberId(phoneNumberId: string): Promise<WhatsappAccount | null> {
+    return this.waRepo.findOne({ where: { phoneNumberId } as any });
+  }
+
+  /* =========================
+     Send messages (wrappers)
+  ========================= */
+
+  // ✅ FIX build: message-send.processor.ts appelle ça
+  async sendTextMessage(waAccount: WhatsappAccount, to: string, body: string): Promise<{ waMessageId?: string }> {
+    const payload = {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'text',
+      text: { body },
+    };
+    return this.sendMessage(waAccount, payload);
+  }
+
+  // ✅ FIX build: controller + processor appellent ça
   async sendTemplateMessage(
     waAccount: WhatsappAccount,
     to: string,
     templateName: string,
     language: string,
-    components?: unknown[],
-  ): Promise<{ waMessageId: string }> {
-    const url = `${WA_API_BASE}/${waAccount.phoneNumberId}/messages`;
-
-    const templatePayload: Record<string, unknown> = {
-      name: templateName,
-      language: { code: language },
+    components?: any[],
+  ): Promise<{ waMessageId?: string }> {
+    const payload = {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: language },
+        ...(components?.length ? { components } : {}),
+      },
     };
-    if (components?.length) {
-      templatePayload.components = components;
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${waAccount.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to,
-        type: 'template',
-        template: templatePayload,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      this.logger.error(`WA template error: ${JSON.stringify(error)}`);
-      throw new Error(`WhatsApp API error: ${error.error?.message || 'Unknown'}`);
-    }
-
-    const result = await response.json();
-    return { waMessageId: result.messages?.[0]?.id };
+    return this.sendMessage(waAccount, payload);
   }
 
-  /**
-   * Submit a template to Meta for approval.
-   */
-  async submitTemplate(
-    waAccount: WhatsappAccount,
-    template: {
-      name: string;
-      language: string;
-      category: string;
-      components: unknown[];
-    },
-  ) {
-    const url = `${WA_API_BASE}/${waAccount.wabaId}/message_templates`;
+  /* =========================
+     Core send (Cloud API)
+  ========================= */
+  async sendMessage(waAccount: WhatsappAccount, payload: any): Promise<{ waMessageId?: string }> {
+    const url = this.graphUrl(`/${waAccount.phoneNumberId}/messages`);
 
-    const response = await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${waAccount.accessToken}`,
+        Authorization: `Bearer ${waAccount.accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        name: template.name,
-        language: template.language,
-        category: template.category,
-        components: template.components,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`Template submission error: ${error.error?.message || 'Unknown'}`);
+    const data: any = await this.safeJson(res);
+
+    if (!res.ok) {
+      const errMsg = data?.error?.message || 'Unknown';
+      throw new Error(`WhatsApp API error: ${errMsg}`);
     }
 
-    return response.json();
+    return { waMessageId: data?.messages?.[0]?.id };
   }
 
-  /**
-   * Download media from WhatsApp.
-   */
+  /* =========================
+     Templates submission (Meta approval)
+  ========================= */
+  async submitTemplate(waAccount: WhatsappAccount, payload: any): Promise<{ id?: string }> {
+    const url = this.graphUrl(`/${waAccount.wabaId}/message_templates`);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${waAccount.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data: any = await this.safeJson(res);
+
+    if (!res.ok) {
+      const errMsg = data?.error?.message || 'Unknown';
+      throw new Error(`Template submission error: ${errMsg}`);
+    }
+
+    return { id: data?.id };
+  }
+
+  /* =========================
+     Media download
+  ========================= */
   async downloadMedia(waAccount: WhatsappAccount, mediaId: string): Promise<Buffer> {
-    // Step 1: Get media URL
-    const metaUrl = `${WA_API_BASE}/${mediaId}`;
-    const metaRes = await fetch(metaUrl, {
-      headers: { 'Authorization': `Bearer ${waAccount.accessToken}` },
+    // 1) meta (contains url)
+    const metaRes = await fetch(this.graphUrl(`/${mediaId}`), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${waAccount.accessToken}` },
     });
-    const meta = await metaRes.json();
 
-    // Step 2: Download actual file
-    const fileRes = await fetch(meta.url, {
-      headers: { 'Authorization': `Bearer ${waAccount.accessToken}` },
+    const meta: any = await this.safeJson(metaRes);
+
+    if (!metaRes.ok) {
+      const errMsg = meta?.error?.message || 'Unknown';
+      throw new Error(`Media meta error: ${errMsg}`);
+    }
+
+    const mediaUrl = meta?.url;
+    if (!mediaUrl) throw new Error('Media meta missing url');
+
+    // 2) download bytes
+    const fileRes = await fetch(mediaUrl, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${waAccount.accessToken}` },
     });
-    const arrayBuffer = await fileRes.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+
+    if (!fileRes.ok) {
+      const errText = await fileRes.text();
+      throw new Error(`Media download error: ${errText || 'Unknown'}`);
+    }
+
+    const arr = await fileRes.arrayBuffer();
+    return Buffer.from(arr);
   }
 }

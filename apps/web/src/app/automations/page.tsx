@@ -191,7 +191,7 @@ export default function AutomationsPage() {
     return selected.steps.find((s) => s.id === selectedStepId) ?? null;
   }, [selected, selectedStepId]);
 
-  const triggerIcon = selected ? ICONS[selected.trigger.type] : Zap;
+  const TriggerIcon = selected ? ICONS[selected.trigger.type] : Zap;
 
   const updateSelected = (patch: Partial<Automation>) => {
     if (!selected) return;
@@ -371,7 +371,7 @@ export default function AutomationsPage() {
               <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <triggerIcon className="w-4 h-4 text-gray-700" />
+                    <TriggerIcon className="w-4 h-4 text-gray-700" />
                     <span className="text-xs text-gray-500">Trigger</span>
                     <span className="text-sm font-semibold">{TRIGGER_LABELS[selected.trigger.type]}</span>
                   </div>

@@ -88,6 +88,7 @@ Summary:`;
 
   private async callClaude(prompt: string): Promise<string> {
     const apiKey = this.config.get('ANTHROPIC_API_KEY');
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -103,21 +104,23 @@ Summary:`;
     });
 
     if (!response.ok) {
-      const err = await response.text();
-      this.logger.error(`Claude API error: ${err}`);
+      const errText = await response.text();
+      this.logger.error(`Claude API error: ${errText}`);
       throw new Error('AI provider error');
     }
 
-    const result = await response.json();
-    return (result as any).content[0].text;
+    // ✅ FIX: json() est typed unknown, on caste en any
+    const result: any = await response.json();
+    return result?.content?.[0]?.text ?? '';
   }
 
   private async callOpenAI(prompt: string): Promise<string> {
     const apiKey = this.config.get('OPENAI_API_KEY');
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -128,12 +131,13 @@ Summary:`;
     });
 
     if (!response.ok) {
-      const err = await response.text();
-      this.logger.error(`OpenAI API error: ${err}`);
+      const errText = await response.text();
+      this.logger.error(`OpenAI API error: ${errText}`);
       throw new Error('AI provider error');
     }
 
-    const result = await response.json();
-    return result.choices[0].message.content;
+    // ✅ FIX: json() est typed unknown, on caste en any
+    const result: any = await response.json();
+    return result?.choices?.[0]?.message?.content ?? '';
   }
 }

@@ -29,14 +29,17 @@ export class TemplatesService {
     return template;
   }
 
-  async create(tenantId: string, dto: {
-    waAccountId: string;
-    name: string;
-    language: string;
-    category: string;
-    components: unknown[];
-    exampleValues?: Record<string, unknown>;
-  }) {
+  async create(
+    tenantId: string,
+    dto: {
+      waAccountId: string;
+      name: string;
+      language: string;
+      category: string;
+      components: unknown[];
+      exampleValues?: Record<string, unknown>;
+    },
+  ) {
     const template = this.templateRepo.create({
       tenantId,
       waAccountId: dto.waAccountId,
@@ -59,7 +62,8 @@ export class TemplatesService {
     const waAccount = await this.waService.getAccount(tenantId, template.waAccountId);
     if (!waAccount) throw new NotFoundException('WhatsApp account not found');
 
-    const result = await this.waService.submitTemplate(waAccount, {
+    // ✅ FIX: ce retour venait typé unknown dans waService
+    const result: any = await this.waService.submitTemplate(waAccount, {
       name: template.name,
       language: template.language,
       category: template.category,
@@ -67,7 +71,7 @@ export class TemplatesService {
     });
 
     template.status = 'pending';
-    template.waTemplateId = result.id;
+    template.waTemplateId = result?.id ?? null;
     return this.templateRepo.save(template);
   }
 
@@ -83,7 +87,10 @@ export class TemplatesService {
     await this.templateRepo.save(template);
   }
 
-  async incrementStats(templateId: string, field: 'sentCount' | 'deliveredCount' | 'readCount' | 'failedCount') {
+  async incrementStats(
+    templateId: string,
+    field: 'sentCount' | 'deliveredCount' | 'readCount' | 'failedCount',
+  ) {
     await this.templateRepo.increment({ id: templateId }, field, 1);
   }
 }

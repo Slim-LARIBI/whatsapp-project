@@ -146,7 +146,6 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
   // Si ton store mock gère les messages au selectConversation, setMessages peut être absent.
   useEffect(() => {
-    // sécurité: si setMessages existe et qu'on veut reset quand on change de convo
     if (typeof setMessages === 'function') setMessages(messages ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
@@ -158,6 +157,21 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+
+  // ✅ FIX: textarea auto-resize même quand on injecte un template (setInput)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const autoResize = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    autoResize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input]);
 
   // Templates drawer
   const [tplOpen, setTplOpen] = useState(false);
@@ -178,14 +192,12 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
   }, [tplSearch, tplCategory]);
 
   const onInsertTemplate = (t: Template) => {
-    // variables: on peut enrichir avec le contact name si dispo
     const vars = {
       ...MOCK_VARS,
       first_name: convo?.contact?.name?.split(' ')?.[0] || MOCK_VARS.first_name,
     };
     const filled = fillVars(t.body, vars);
 
-    // Insert dans le champ (sans envoyer)
     setInput((prev) => (prev?.trim() ? prev + '\n\n' + filled : filled));
     setTplOpen(false);
   };
@@ -196,17 +208,10 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
     setSending(true);
 
     try {
-      /**
-       * MODE MOCK:
-       * - Si ton store addMessage attend un string => addMessage("hello")
-       * - Si ton store addMessage attend un objet Message => addMessage({ ... })
-       */
       if (typeof addMessageStore === 'function') {
-        // essaie string (mock store actuel chez toi)
         try {
           addMessageStore(body);
         } catch {
-          // fallback objet
           addMessageStore({
             id: Math.random().toString(36).slice(2),
             direction: 'out',
@@ -250,7 +255,6 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
           <button
             onClick={() => {
-              // mock "AI reply"
               const suggestion =
                 `Bonjour ${convo?.contact?.name?.split(' ')?.[0] || '👋'}, ` +
                 `je m’en occupe. Pouvez-vous me partager votre numéro de commande ?`;
@@ -325,13 +329,15 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         <div className="p-3 pt-2">
           <div className="flex items-end gap-2">
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type a message... (Enter to send, Shift+Enter new line)"
               rows={1}
-              className="flex-1 resize-none border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-whatsapp-green"
+              className="flex-1 resize-none overflow-hidden border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-whatsapp-green"
             />
+
             <button
               onClick={handleSend}
               disabled={!input.trim() || sending}
@@ -348,18 +354,12 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
       {tplOpen && (
         <div className="absolute inset-0 z-50">
           {/* overlay */}
-          <div
-            className="absolute inset-0 bg-black/20"
-            onClick={() => setTplOpen(false)}
-          />
+          <div className="absolute inset-0 bg-black/20" onClick={() => setTplOpen(false)} />
           {/* panel */}
           <div className="absolute right-0 top-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-xl flex flex-col">
             <div className="h-14 px-4 border-b border-gray-200 flex items-center justify-between">
               <div className="font-semibold text-sm">Templates</div>
-              <button
-                onClick={() => setTplOpen(false)}
-                className="p-2 rounded-lg hover:bg-gray-50"
-              >
+              <button onClick={() => setTplOpen(false)} className="p-2 rounded-lg hover:bg-gray-50">
                 <X size={18} />
               </button>
             </div>
@@ -448,9 +448,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
               })}
 
               {filteredTemplates.length === 0 && (
-                <div className="text-sm text-gray-400 text-center py-10">
-                  No templates found.
-                </div>
+                <div className="text-sm text-gray-400 text-center py-10">No templates found.</div>
               )}
             </div>
 
