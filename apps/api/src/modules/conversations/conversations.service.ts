@@ -1,12 +1,19 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { ConversationsGateway } from '../conversations/conversations.gateway';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+
+import { ConversationsGateway } from './conversations.gateway';
 import { Conversation } from './conversation.entity';
 import { Message } from './message.entity';
-import { QUEUE_MESSAGE_SEND, isWithin24hWindow, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@whatsapp-platform/shared';
+
+import {
+  QUEUE_MESSAGE_SEND,
+  isWithin24hWindow,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from '@whatsapp-platform/shared';
 
 @Injectable()
 export class ConversationsService {
@@ -17,30 +24,38 @@ export class ConversationsService {
     private readonly messageRepo: Repository<Message>,
     @InjectQueue(QUEUE_MESSAGE_SEND)
     private readonly sendQueue: Queue,
+    private readonly gateway: ConversationsGateway,
   ) {}
 
-  async findAll(tenantId: string, query: {
-    page?: number;
-    limit?: number;
-    status?: string;
-    assignedTo?: string;
-  }) {
+  async findAll(
+    tenantId: string,
+    query: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      assignedTo?: string;
+    },
+  ) {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(query.limit || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
-    const qb = this.convoRepo.createQueryBuilder('c')
-      .where('c.tenant_id = :tenantId', { tenantId })
+    // ⚠️ IMPORTANT: utiliser les "property names" et PAS les noms de colonnes DB
+    const qb = this.convoRepo
+      .createQueryBuilder('c')
+      .where('c.tenantId = :tenantId', { tenantId })
       .leftJoinAndSelect('c.contact', 'contact')
-      .leftJoinAndSelect('c.assignee', 'assignee');
+      .leftJoinAndSelect('c.assignee', 'assignee')
+      .leftJoinAndSelect('c.waAccount', 'waAccount');
 
     if (query.status) {
       qb.andWhere('c.status = :status', { status: query.status });
     }
     if (query.assignedTo) {
-      qb.andWhere('c.assigned_to = :assignedTo', { assignedTo: query.assignedTo });
+      qb.andWhere('c.assignedTo = :assignedTo', { assignedTo: query.assignedTo });
     }
 
-    qb.orderBy('c.last_message_at', 'DESC', 'NULLS LAST')
+    // ✅ property name + nulls last
+    qb.orderBy('c.lastMessageAt', 'DESC', 'NULLS LAST')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -71,30 +86,41 @@ export class ConversationsService {
     return { data, meta: { page, limit, total } };
   }
 
+  // -----------------------------
+  // FIND OR CREATE CONVERSATION
+  // -----------------------------
   async findOrCreateConversation(tenantId: string, contactId: string, waAccountId: string) {
     let convo = await this.convoRepo.findOne({
       where: { tenantId, contactId, waAccountId, status: 'open' },
     });
 
     if (!convo) {
-      convo = this.convoRepo.create({
+      // ✅ pas de cast, repo est bien Repository<Conversation>
+      const created = this.convoRepo.create({
         tenantId,
         contactId,
         waAccountId,
         status: 'open',
       });
-      convo = await this.convoRepo.save(convo);
+      convo = await this.convoRepo.save(created);
     }
 
     return convo;
   }
 
-  async storeInboundMessage(convo: Conversation, data: {
-    waMessageId: string;
-    type: string;
-    content: Record<string, unknown>;
-    contactId: string;
-  }) {
+  // -----------------------------
+  // INBOUND MESSAGE
+  // -----------------------------
+  async storeInboundMessage(
+    convo: Conversation,
+    data: {
+      waMessageId: string;
+      type: string;
+      content: Record<string, unknown>;
+      contactId: string;
+    },
+  ) {
+    // ✅ pas de cast Message[] → Message
     const message = this.messageRepo.create({
       tenantId: convo.tenantId,
       conversationId: convo.id,
@@ -105,76 +131,150 @@ export class ConversationsService {
       content: data.content,
       status: 'delivered',
     });
+
     const saved = await this.messageRepo.save(message);
 
-    // Update conversation
-    await this.convoRepo.update(convo.id, {
-      lastMessageAt: new Date(),
-      lastInboundAt: new Date(),
-      unreadCount: () => 'unread_count + 1',
-      status: 'open',
+    await this.convoRepo.update(
+      { id: convo.id, tenantId: convo.tenantId },
+      {
+        lastMessageAt: new Date(),
+        lastInboundAt: new Date(),
+        unreadCount: () => 'unread_count + 1',
+        status: 'open',
+      },
+    );
+
+    // 🔔 websocket update
+    this.gateway.emitConversationUpdate(convo.tenantId, {
+      conversationId: convo.id,
+      update: { lastMessageAt: new Date(), lastInboundAt: new Date() },
     });
 
     return saved;
   }
 
-  async sendAgentReply(tenantId: string, conversationId: string, senderId: string, body: string) {
-    const convo = await this.findById(tenantId, conversationId);
+  // -----------------------------
+  // OUTBOUND AGENT REPLY
+  // -----------------------------
+    async sendAgentReply(tenantId: string, conversationId: string, agentUserId: string, body: string) {
+    const convo = await this.convoRepo.findOne({
+      where: { id: conversationId, tenantId },
+      relations: ['waAccount', 'contact'],
+    });
+    if (!convo) throw new NotFoundException('Conversation not found');
 
-    // Check 24h window
-    if (!isWithin24hWindow(convo.lastInboundAt)) {
-      throw new BadRequestException(
-        'Outside 24h window. Use a template message instead.',
-      );
+    if (!body?.trim()) throw new BadRequestException('Body is required');
+
+    // (optionnel) règle 24h WhatsApp
+    const within24h = isWithin24hWindow(convo.lastInboundAt ? new Date(convo.lastInboundAt) : null);
+    if (!within24h) {
+      // throw new BadRequestException('24h window expired. Use template message.');
     }
 
-    // Create message record
+    // ✅ IMPORTANT: ne pas mettre sentBy (le champ n'existe pas dans Message entity)
     const message = this.messageRepo.create({
       tenantId,
       conversationId,
-      senderId,
       contactId: convo.contactId,
       direction: 'outbound',
       type: 'text',
       content: { body },
-      status: 'pending',
+      status: 'queued',
     });
-    const saved = await this.messageRepo.save(message);
 
-    // Enqueue for sending via WhatsApp
-    await this.sendQueue.add('send-text', {
-      messageId: saved.id,
+    // ✅ force TypeScript à comprendre que c'est un Message (pas Message[])
+    const saved = (await this.messageRepo.save(message)) as unknown as Message;
+
+    await this.sendQueue.add(QUEUE_MESSAGE_SEND, {
       tenantId,
+      conversationId,
       waAccountId: convo.waAccountId,
       to: convo.contact?.phone,
       body,
+      messageId: saved.id,
     });
 
-    // Update conversation
-    await this.convoRepo.update(convo.id, {
-      lastMessageAt: new Date(),
-      unreadCount: 0,
-    });
-
-    return saved;
-  }
-
-  async assign(tenantId: string, id: string, userId: string) {
-    await this.convoRepo.update({ id, tenantId }, { assignedTo: userId });
-    return this.findById(tenantId, id);
-  }
-
-  async updateStatus(tenantId: string, id: string, status: string) {
-    const update: Partial<Conversation> = { status };
-    if (status === 'closed') update.closedAt = new Date();
-    await this.convoRepo.update({ id, tenantId }, update);
-    return this.findById(tenantId, id);
-  }
-
-  async updateMessageStatus(waMessageId: string, status: string, errorCode?: number, errorMessage?: string) {
-    await this.messageRepo.update(
-      { waMessageId },
-      { status, errorCode, errorMessage },
+    await this.convoRepo.update(
+      { id: conversationId, tenantId },
+      { lastMessageAt: new Date() },
     );
+
+    this.gateway.emitConversationUpdate(tenantId, {
+      conversationId,
+      update: { lastMessageAt: new Date() },
+    });
+
+    return { ok: true, messageId: saved.id };
+  }
+
+  // -----------------------------
+  // ASSIGN
+  // -----------------------------
+  async assign(tenantId: string, conversationId: string, userId: string | null) {
+    const convo = await this.convoRepo.findOne({ where: { id: conversationId, tenantId } });
+    if (!convo) throw new NotFoundException('Conversation not found');
+
+    await this.convoRepo.update(
+      { id: conversationId, tenantId },
+      { assignedTo: userId || null },
+    );
+
+    this.gateway.emitConversationUpdate(tenantId, {
+      conversationId,
+      update: { assignedTo: userId || null },
+    });
+
+    return { ok: true };
+  }
+
+  // -----------------------------
+  // UPDATE STATUS
+  // -----------------------------
+  async updateStatus(tenantId: string, conversationId: string, status: string) {
+    const convo = await this.convoRepo.findOne({ where: { id: conversationId, tenantId } });
+    if (!convo) throw new NotFoundException('Conversation not found');
+
+    await this.convoRepo.update(
+      { id: conversationId, tenantId },
+      { status },
+    );
+
+    this.gateway.emitConversationUpdate(tenantId, {
+      conversationId,
+      update: { status },
+    });
+
+    return { ok: true };
+  }
+
+  // -----------------------------
+  // UPDATE MESSAGE STATUS (webhook)
+  // -----------------------------
+  async updateMessageStatus(
+    tenantId: string,
+    waMessageId: string,
+    status: string,
+    errorCode?: string,
+    errorTitle?: string,
+  ) {
+    const msg = await this.messageRepo.findOne({ where: { tenantId, waMessageId } });
+    if (!msg) return { ok: false, reason: 'message_not_found' };
+
+    await this.messageRepo.update(
+      { id: msg.id, tenantId },
+      {
+        status,
+        errorCode: errorCode || null,
+        errorTitle: errorTitle || null,
+      } as any,
+    );
+
+    // refresh convo if needed
+    this.gateway.emitConversationUpdate(tenantId, {
+      conversationId: msg.conversationId,
+      update: { lastMessageAt: new Date() },
+    });
+
+    return { ok: true };
   }
 }

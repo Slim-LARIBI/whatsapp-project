@@ -1,4 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToMany,
+} from 'typeorm';
+
 import { User } from '../auth/user.entity';
 import { Contact } from '../contacts/contact.entity';
 import { WhatsappAccount } from '../whatsapp/whatsapp-account.entity';
@@ -22,6 +30,13 @@ export class Tenant {
 
   @Column({ type: 'jsonb', default: {} })
   settings: Record<string, unknown>;
+
+  // ✅ WhatsApp Cloud API configuration (lié à ce tenant)
+  @Column({ name: 'meta_phone_number_id', nullable: true })
+  metaPhoneNumberId?: string | null;
+
+  @Column({ name: 'meta_access_token', type: 'text', nullable: true })
+  metaAccessToken?: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

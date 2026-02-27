@@ -132,11 +132,12 @@ export class WebhookService {
     this.logger.debug(`Status update: ${status.id} → ${status.status}`);
 
     await this.convoService.updateMessageStatus(
+      tenantId,
       status.id,
       status.status,
-      status.errors?.[0]?.code,
-      status.errors?.[0]?.title,
-    );
+      String(status.errors?.[0]?.code ?? ''),
+    status.errors?.[0]?.title,
+  );
 
     // Emit real-time status update
     this.gateway.emitMessageStatus(tenantId, {
