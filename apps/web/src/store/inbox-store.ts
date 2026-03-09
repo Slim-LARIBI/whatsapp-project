@@ -95,6 +95,108 @@ function normalizeMessage(raw: any): Message {
   };
 }
 
+function areMessagesDifferent(a: Message[], b: Message[]) {
+  if (a.length !== b.length) return true;
+
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].status !== b[i].status ||
+      a[i].createdAt !== b[i].createdAt ||
+      (a[i].content?.body || a[i].content?.text || '') !==
+        (b[i].content?.body || b[i].content?.text || '')
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function areConversationsDifferent(a: Conversation[], b: Conversation[]) {
+  if (a.length !== b.length) return true;
+
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].status !== b[i].status ||
+      a[i].lastMessageAt !== b[i].lastMessageAt ||
+      a[i].unreadCount !== b[i].unreadCount
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/* =========================
+   LIVE POLLING (bug #2)
+========================= */
+let inboxPollerStarted = false;
+let inboxPoller: ReturnType<typeof setInterval> | null = null;
+let inboxPollingBusy = false;
+
+async function backgroundSync() {
+  if (inboxPollingBusy) return;
+  inboxPollingBusy = true;
+
+  try {
+    const state = useInboxStore.getState();
+
+    const convRes = await api.getConversations();
+    const convRows = Array.isArray(convRes?.data) ? convRes.data : Array.isArray(convRes) ? convRes : [];
+    const normalizedConversations = convRows.map(normalizeConversation);
+
+    let nextSelectedId =
+      state.selectedConversationId &&
+      normalizedConversations.some((c) => c.id === state.selectedConversationId)
+        ? state.selectedConversationId
+        : normalizedConversations[0]?.id || null;
+
+    if (areConversationsDifferent(state.conversations, normalizedConversations) || nextSelectedId !== state.selectedConversationId) {
+      useInboxStore.setState({
+        conversations: normalizedConversations,
+        selectedConversationId: nextSelectedId,
+        usingMock: false,
+      });
+    }
+
+    if (!nextSelectedId) {
+      if (state.messages.length > 0) {
+        useInboxStore.setState({ messages: [] });
+      }
+      return;
+    }
+
+    const msgRes = await api.getConversationMessages(nextSelectedId);
+    const msgRows = Array.isArray(msgRes?.data) ? msgRes.data : Array.isArray(msgRes) ? msgRes : [];
+    const normalizedMessages = msgRows.map(normalizeMessage);
+
+    const latestState = useInboxStore.getState();
+    if (areMessagesDifferent(latestState.messages, normalizedMessages)) {
+      useInboxStore.setState({
+        messages: normalizedMessages,
+        loadingMessages: false,
+        usingMock: false,
+      });
+    }
+  } catch (error) {
+    console.error('backgroundSync failed', error);
+  } finally {
+    inboxPollingBusy = false;
+  }
+}
+
+function startInboxPolling() {
+  if (inboxPollerStarted) return;
+  inboxPollerStarted = true;
+
+  inboxPoller = setInterval(() => {
+    void backgroundSync();
+  }, 3000);
+}
+
 export const useInboxStore = create<InboxState>((set, get) => ({
   conversations: [],
   selectedConversationId: null,
@@ -107,6 +209,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
 
   bootstrap: async () => {
     await get().refreshConversations();
+    startInboxPolling();
   },
 
   refreshConversations: async () => {
@@ -201,7 +304,6 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     try {
       await api.sendConversationMessage(conversationId, { body });
 
-      // recharge les messages réels + conversations
       await get().selectConversation(conversationId);
       await get().refreshConversations();
     } catch (error) {

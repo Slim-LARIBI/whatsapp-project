@@ -199,8 +199,8 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col relative">
-      <div className="h-14 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
+    <div className="flex-1 min-h-0 flex flex-col relative">
+      <div className="h-14 shrink-0 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
         <div className="min-w-0">
           <div className="font-medium text-sm truncate">{convo?.contact?.name || 'Conversation'}</div>
           <div className="text-xs text-gray-400">{convo?.contact?.phone || ''}</div>
@@ -230,7 +230,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2 bg-gray-50">
         {loadingMessages ? (
           <div className="text-sm text-gray-400">Loading messages...</div>
         ) : (
@@ -265,7 +265,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-gray-200 bg-white">
+      <div className="shrink-0 border-t border-gray-200 bg-white">
         <div className="px-3 pt-3 pb-2 flex gap-2 flex-wrap">
           <button
             onClick={() => setTplOpen(true)}

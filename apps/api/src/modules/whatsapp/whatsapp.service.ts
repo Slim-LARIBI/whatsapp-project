@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-
-// ⚠️ Ajuste le chemin si ton entity s'appelle autrement
 import { WhatsappAccount } from './whatsapp-account.entity';
 
 @Injectable()
@@ -32,33 +30,38 @@ export class WhatsappService {
   /* =========================
      Accounts
   ========================= */
-
-  // ✅ Utilisé par TemplatesService (tenant + waAccountId)
   async getAccount(tenantId: string, waAccountId: string): Promise<WhatsappAccount | null> {
-    return this.waRepo.findOne({ where: { id: waAccountId, tenantId } as any });
+    return this.waRepo.findOne({
+      where: { id: waAccountId, tenantId } as any,
+    });
   }
 
-  // ✅ FIX build: webhook.service.ts appelle ça
   async getAccountByPhoneNumberId(phoneNumberId: string): Promise<WhatsappAccount | null> {
-    return this.waRepo.findOne({ where: { phoneNumberId } as any });
+    return this.waRepo.findOne({
+      where: { phoneNumberId } as any,
+    });
   }
 
   /* =========================
      Send messages (wrappers)
   ========================= */
+  async sendTextMessage(
+    waAccount: WhatsappAccount,
+    to: string,
+    body: string,
+  ): Promise<{ waMessageId?: string }> {
+    const cleanTo = to.replace(/\D/g, '');
 
-  // ✅ FIX build: message-send.processor.ts appelle ça
-  async sendTextMessage(waAccount: WhatsappAccount, to: string, body: string): Promise<{ waMessageId?: string }> {
     const payload = {
       messaging_product: 'whatsapp',
-      to,
+      to: cleanTo,
       type: 'text',
       text: { body },
     };
+
     return this.sendMessage(waAccount, payload);
   }
 
-  // ✅ FIX build: controller + processor appellent ça
   async sendTemplateMessage(
     waAccount: WhatsappAccount,
     to: string,
@@ -66,9 +69,11 @@ export class WhatsappService {
     language: string,
     components?: any[],
   ): Promise<{ waMessageId?: string }> {
+    const cleanTo = to.replace(/\D/g, '');
+
     const payload = {
       messaging_product: 'whatsapp',
-      to,
+      to: cleanTo,
       type: 'template',
       template: {
         name: templateName,
@@ -76,14 +81,26 @@ export class WhatsappService {
         ...(components?.length ? { components } : {}),
       },
     };
+
     return this.sendMessage(waAccount, payload);
   }
 
   /* =========================
      Core send (Cloud API)
   ========================= */
-  async sendMessage(waAccount: WhatsappAccount, payload: any): Promise<{ waMessageId?: string }> {
-    const url = this.graphUrl(`/${waAccount.phoneNumberId}/messages`);
+  async sendMessage(
+    waAccount: WhatsappAccount,
+    payload: any,
+  ): Promise<{ waMessageId?: string }> {
+    const phoneId = waAccount.phoneNumberId;
+
+    if (!phoneId) {
+      throw new Error('WhatsApp phoneNumberId is missing on account');
+    }
+
+    const url = this.graphUrl(`/${phoneId}/messages`);
+
+    this.logger.log(`Sending WA message to ${payload.to} using phoneId ${phoneId}`);
 
     const res = await fetch(url, {
       method: 'POST',
@@ -98,6 +115,7 @@ export class WhatsappService {
 
     if (!res.ok) {
       const errMsg = data?.error?.message || 'Unknown';
+      this.logger.error(`WhatsApp send failed: ${JSON.stringify(data)}`);
       throw new Error(`WhatsApp API error: ${errMsg}`);
     }
 
@@ -133,10 +151,11 @@ export class WhatsappService {
      Media download
   ========================= */
   async downloadMedia(waAccount: WhatsappAccount, mediaId: string): Promise<Buffer> {
-    // 1) meta (contains url)
     const metaRes = await fetch(this.graphUrl(`/${mediaId}`), {
       method: 'GET',
-      headers: { Authorization: `Bearer ${waAccount.accessToken}` },
+      headers: {
+        Authorization: `Bearer ${waAccount.accessToken}`,
+      },
     });
 
     const meta: any = await this.safeJson(metaRes);
@@ -147,12 +166,15 @@ export class WhatsappService {
     }
 
     const mediaUrl = meta?.url;
-    if (!mediaUrl) throw new Error('Media meta missing url');
+    if (!mediaUrl) {
+      throw new Error('Media meta missing url');
+    }
 
-    // 2) download bytes
     const fileRes = await fetch(mediaUrl, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${waAccount.accessToken}` },
+      headers: {
+        Authorization: `Bearer ${waAccount.accessToken}`,
+      },
     });
 
     if (!fileRes.ok) {
