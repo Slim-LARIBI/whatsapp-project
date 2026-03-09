@@ -30,7 +30,12 @@ export default function InboxClient() {
     selectConversation,
     setComposerDraft,
     appendComposerDraft,
+    bootstrap,
   } = useInboxStore();
+
+    useEffect(() => {
+    bootstrap();
+  }, [bootstrap]);
 
   const selectedConversation = useMemo(() => {
     if (!selectedConversationId) return undefined;

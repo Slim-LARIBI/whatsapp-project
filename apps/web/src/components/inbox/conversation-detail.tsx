@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { api } from '@/lib/api';
+import { useMemo } from 'react';
+import { useInboxStore } from '@/store/inbox-store';
 import {
   User,
   Phone,
@@ -17,6 +17,7 @@ import {
   Package,
   Wallet,
 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface ConversationDetailProps {
   conversationId: string;
@@ -24,36 +25,6 @@ interface ConversationDetailProps {
 
 type OptInStatus = 'opted_in' | 'opted_out' | 'pending';
 type OrderStatus = 'paid' | 'shipped' | 'delivered' | 'refunded';
-
-interface ConvoData {
-  contact?: {
-    name: string;
-    phone: string;
-    email?: string;
-    tags?: string[];
-    optInStatus: OptInStatus;
-  };
-  status: 'open' | 'closed' | 'pending';
-  aiIntent?: string;
-  aiSummary?: string;
-
-  // Optional “segments”
-  segments?: string[]; // ["VIP", "Repeat buyer", "AI: order_issue"]
-}
-
-const MOCK_CONVO: ConvoData = {
-  contact: {
-    name: 'Amira Ben Salah',
-    phone: '+21622123456',
-    email: 'amira@example.com',
-    tags: ['order_issue', 'open'],
-    optInStatus: 'opted_in',
-  },
-  status: 'pending',
-  aiIntent: 'order_issue',
-  aiSummary: 'Problème avec une commande',
-  segments: ['VIP', 'Repeat buyer', 'AI: order_issue'],
-};
 
 const MOCK_COMMERCE = {
   kpis: { clv: 489, orders: 4, aov: 122 },
@@ -126,29 +97,12 @@ function insertToComposer(text: string) {
 }
 
 export function ConversationDetail({ conversationId }: ConversationDetailProps) {
-  const [data, setData] = useState<ConvoData | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
+  const conversations = useInboxStore((s) => s.conversations);
+  const usingMock = useInboxStore((s) => s.usingMock);
 
-  useEffect(() => {
-    let alive = true;
-    setData(null);
-    setUsingMock(false);
-
-    api.getConversation(conversationId)
-      .then((res) => {
-        if (!alive) return;
-        setData(res as ConvoData);
-      })
-      .catch(() => {
-        if (!alive) return;
-        setUsingMock(true);
-        setData(MOCK_CONVO);
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [conversationId]);
+  const data = useMemo(() => {
+    return conversations.find((c) => c.id === conversationId) || null;
+  }, [conversations, conversationId]);
 
   const segments = useMemo(() => {
     const s = data?.segments?.length ? data.segments : [];
@@ -159,7 +113,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
   return (
     <aside className="h-full overflow-y-auto border-l border-gray-200 bg-white">
-      {/* sticky banner */}
       <div className="sticky top-0 z-10 bg-white border-b border-gray-100 p-3">
         {usingMock && (
           <div className="text-xs bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg px-3 py-2">
@@ -169,7 +122,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
       </div>
 
       <div className="p-4 space-y-4">
-        {/* Top card: identity + quick actions */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-full bg-whatsapp-green text-white flex items-center justify-center font-semibold">
@@ -188,7 +140,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
                 </span>
               </div>
 
-              {/* Badges */}
               <div className="mt-2 flex flex-wrap gap-1">
                 {segments.map((s) => (
                   <span
@@ -200,7 +151,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
                 ))}
               </div>
 
-              {/* Quick actions grid */}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   className="text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
@@ -218,7 +168,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
                 <button
                   className="text-xs py-2 px-3 rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center justify-center gap-2"
-                  onClick={() => alert('Mock: Assign agent')}
+                  onClick={() => alert('Assign agent API later')}
                 >
                   <UserPlus size={14} /> Assign agent
                 </button>
@@ -234,7 +184,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </div>
         </div>
 
-        {/* Contact info */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Contact</h3>
           <div className="space-y-2">
@@ -253,18 +202,17 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
               </div>
             )}
             <div className="pt-2">
-              <span className={`text-xs px-2 py-1 rounded ${consentPill(data.contact?.optInStatus)}`}>
+              <span className={`text-xs px-2 py-1 rounded ${consentPill(data.contact?.optInStatus as OptInStatus)}`}>
                 {data.contact?.optInStatus || 'pending'}
               </span>
             </div>
           </div>
         </div>
 
-        {/* Tags */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Tags</h3>
           <div className="flex flex-wrap gap-1">
-            {(data.contact?.tags?.length ? data.contact.tags : ['order_issue', data.status]).map((tag) => (
+            {(data.contact?.tags?.length ? data.contact.tags : [data.aiIntent || 'conversation', data.status]).map((tag) => (
               <span key={tag} className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs flex items-center gap-1">
                 <Tag size={10} />
                 {tag}
@@ -273,7 +221,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </div>
         </div>
 
-        {/* AI */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
             <Bot size={12} /> AI Insights
@@ -296,7 +243,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </button>
         </div>
 
-        {/* Commerce KPIs */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Commerce (mock)</h3>
 
@@ -306,7 +252,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
             <MiniKpi icon={<ShoppingCart size={14} className="text-gray-400" />} label="AOV" value={`${MOCK_COMMERCE.kpis.aov} TND`} />
           </div>
 
-          {/* Cart */}
           <div className="mt-3 border border-gray-100 rounded-lg p-3">
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold">Cart</div>
@@ -339,7 +284,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </div>
         </div>
 
-        {/* Recent orders */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Recent orders</h3>
           <div className="space-y-2">
@@ -382,7 +326,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </div>
         </div>
 
-        {/* Cross-sell */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Cross-sell</h3>
           <div className="space-y-2">
@@ -409,7 +352,6 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
           </div>
         </div>
 
-        {/* Internal note */}
         <div className="border border-gray-200 rounded-xl p-3 bg-white">
           <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">Internal note</h3>
           <textarea

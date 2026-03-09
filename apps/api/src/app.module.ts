@@ -10,6 +10,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { AiModule } from './modules/ai/ai.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { WebhookModule } from './modules/webhook/webhook.module';
     TemplatesModule,
     AiModule,
     WebhookModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

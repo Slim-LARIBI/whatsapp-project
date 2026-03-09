@@ -16,17 +16,11 @@ import {
   Search,
 } from 'lucide-react';
 
-/**
- * FRONT-ONLY: Templates Drawer + Insert into composer
- * - Aucun backend requis
- * - Plus tard: tu remplaces TEMPLATES[] par une API/Supabase
- */
-
 /* =========================
-   Mock variables (plus tard: Woo/Presta)
+   Mock variables UI only
 ========================= */
 const MOCK_VARS: Record<string, string> = {
-  first_name: 'Amira',
+  first_name: 'Client',
   cart_total: '159',
   coupon_code: 'VIP10',
   order_id: '1234',
@@ -35,9 +29,6 @@ const MOCK_VARS: Record<string, string> = {
   tracking_url: 'https://tracking.example.com/ARX-123',
 };
 
-/* =========================
-   Templates mock (réutilisables)
-========================= */
 type Template = {
   id: string;
   title: string;
@@ -125,41 +116,30 @@ function getCategoryLabel(c: Template['category']) {
   }
 }
 
-/* =========================
-   Component
-========================= */
 interface ConversationViewProps {
   conversationId: string;
 }
 
 export function ConversationView({ conversationId }: ConversationViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const conversations = useInboxStore((s: any) => s.conversations);
-  const messages = useInboxStore((s: any) => s.messages);
-  const setMessages = useInboxStore((s: any) => s.setMessages);
-  const addMessageStore = useInboxStore((s: any) => s.addMessage);
+  const conversations = useInboxStore((s) => s.conversations);
+  const messages = useInboxStore((s) => s.messages);
+  const composerDraft = useInboxStore((s) => s.composerDraft);
+  const setComposerDraft = useInboxStore((s) => s.setComposerDraft);
+  const sendMessage = useInboxStore((s) => s.sendMessage);
+  const loadingMessages = useInboxStore((s) => s.loadingMessages);
 
   const convo = useMemo(() => {
-    return (conversations || []).find((c: any) => c.id === conversationId);
+    return conversations.find((c) => c.id === conversationId);
   }, [conversations, conversationId]);
 
-  // Si ton store mock gère les messages au selectConversation, setMessages peut être absent.
-  useEffect(() => {
-    if (typeof setMessages === 'function') setMessages(messages ?? []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
-
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-
-  // ✅ FIX: textarea auto-resize même quand on injecte un template (setInput)
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const autoResize = () => {
     const el = textareaRef.current;
@@ -170,10 +150,8 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
   useEffect(() => {
     autoResize();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input]);
+  }, [composerDraft]);
 
-  // Templates drawer
   const [tplOpen, setTplOpen] = useState(false);
   const [tplSearch, setTplSearch] = useState('');
   const [tplCategory, setTplCategory] = useState<'all' | Template['category']>('all');
@@ -197,32 +175,17 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
       first_name: convo?.contact?.name?.split(' ')?.[0] || MOCK_VARS.first_name,
     };
     const filled = fillVars(t.body, vars);
-
-    setInput((prev) => (prev?.trim() ? prev + '\n\n' + filled : filled));
+    setComposerDraft(composerDraft?.trim() ? `${composerDraft}\n\n${filled}` : filled);
     setTplOpen(false);
   };
 
   const handleSend = async () => {
-    const body = input.trim();
+    const body = composerDraft.trim();
     if (!body || sending) return;
-    setSending(true);
 
+    setSending(true);
     try {
-      if (typeof addMessageStore === 'function') {
-        try {
-          addMessageStore(body);
-        } catch {
-          addMessageStore({
-            id: Math.random().toString(36).slice(2),
-            direction: 'out',
-            type: 'text',
-            content: { body },
-            status: 'sent',
-            createdAt: new Date().toISOString(),
-          });
-        }
-      }
-      setInput('');
+      await sendMessage(body);
     } finally {
       setSending(false);
     }
@@ -237,7 +200,6 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
   return (
     <div className="flex-1 flex flex-col relative">
-      {/* Header */}
       <div className="h-14 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
         <div className="min-w-0">
           <div className="font-medium text-sm truncate">{convo?.contact?.name || 'Conversation'}</div>
@@ -258,7 +220,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
               const suggestion =
                 `Bonjour ${convo?.contact?.name?.split(' ')?.[0] || '👋'}, ` +
                 `je m’en occupe. Pouvez-vous me partager votre numéro de commande ?`;
-              setInput((prev) => (prev?.trim() ? prev + '\n\n' + suggestion : suggestion));
+              setComposerDraft(composerDraft?.trim() ? `${composerDraft}\n\n${suggestion}` : suggestion);
             }}
             className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-2"
           >
@@ -268,36 +230,41 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         </div>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50">
-        {(messages || []).map((msg: any) => {
-          const dir = msg.direction;
-          const inbound = dir === 'in' || dir === 'inbound';
-          const outbound = dir === 'out' || dir === 'outbound';
-          return (
-            <div
-              key={msg.id}
-              className={cn(
-                'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
-                inbound ? 'bg-white border border-gray-200 mr-auto' : '',
-                outbound ? 'bg-whatsapp-light ml-auto' : '',
-              )}
-            >
-              {msg.content?.body && <p className="whitespace-pre-wrap">{msg.content.body}</p>}
+        {loadingMessages ? (
+          <div className="text-sm text-gray-400">Loading messages...</div>
+        ) : (
+          (messages || []).map((msg: any) => {
+            const dir = msg.direction;
+            const inbound = dir === 'in' || dir === 'inbound';
+            const outbound = dir === 'out' || dir === 'outbound';
 
-              <div className="flex items-center justify-end gap-1 mt-1">
-                <span className="text-[10px] text-gray-400">
-                  {msg.createdAt ? format(new Date(msg.createdAt), 'HH:mm') : ''}
-                </span>
-                {outbound && <StatusIcon status={msg.status} />}
+            const body = msg.content?.body || msg.content?.text || '';
+
+            return (
+              <div
+                key={msg.id}
+                className={cn(
+                  'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
+                  inbound ? 'bg-white border border-gray-200 mr-auto' : '',
+                  outbound ? 'bg-whatsapp-light ml-auto' : '',
+                )}
+              >
+                {body && <p className="whitespace-pre-wrap">{body}</p>}
+
+                <div className="flex items-center justify-end gap-1 mt-1">
+                  <span className="text-[10px] text-gray-400">
+                    {msg.createdAt ? format(new Date(msg.createdAt), 'HH:mm') : ''}
+                  </span>
+                  {outbound && <StatusIcon status={msg.status} />}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Composer + quick actions */}
       <div className="border-t border-gray-200 bg-white">
         <div className="px-3 pt-3 pb-2 flex gap-2 flex-wrap">
           <button
@@ -307,10 +274,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
             <FileText size={14} /> Templates
           </button>
           <button
-            onClick={() => {
-              const tagLine = '[Tag]';
-              setInput((prev) => (prev?.trim() ? prev + ' ' + tagLine : tagLine));
-            }}
+            onClick={() => setComposerDraft(composerDraft?.trim() ? `${composerDraft} [Tag]` : '[Tag]')}
             className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50"
           >
             Add tag
@@ -318,7 +282,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
           <button
             onClick={() => {
               const line = `Order #${MOCK_VARS.order_id} — ${MOCK_VARS.order_total} TND`;
-              setInput((prev) => (prev?.trim() ? prev + '\n' + line : line));
+              setComposerDraft(composerDraft?.trim() ? `${composerDraft}\n${line}` : line);
             }}
             className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50"
           >
@@ -330,8 +294,8 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
           <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
+              value={composerDraft}
+              onChange={(e) => setComposerDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type a message... (Enter to send, Shift+Enter new line)"
               rows={1}
@@ -340,7 +304,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
             <button
               onClick={handleSend}
-              disabled={!input.trim() || sending}
+              disabled={!composerDraft.trim() || sending}
               className="p-3 bg-whatsapp-green text-white rounded-xl hover:bg-whatsapp-dark disabled:opacity-50 transition-colors"
               title="Send"
             >
@@ -350,12 +314,9 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         </div>
       </div>
 
-      {/* Templates Drawer */}
       {tplOpen && (
         <div className="absolute inset-0 z-50">
-          {/* overlay */}
           <div className="absolute inset-0 bg-black/20" onClick={() => setTplOpen(false)} />
-          {/* panel */}
           <div className="absolute right-0 top-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-xl flex flex-col">
             <div className="h-14 px-4 border-b border-gray-200 flex items-center justify-between">
               <div className="font-semibold text-sm">Templates</div>
@@ -494,6 +455,7 @@ function Chip({
 function StatusIcon({ status }: { status: string }) {
   switch (status) {
     case 'pending':
+    case 'queued':
       return <Clock size={12} className="text-gray-400" />;
     case 'sent':
       return <Check size={12} className="text-gray-400" />;
