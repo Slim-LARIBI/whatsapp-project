@@ -14,6 +14,7 @@ import {
   Sparkles,
   X,
   Search,
+  CornerUpLeft,
 } from 'lucide-react';
 
 /* =========================
@@ -130,6 +131,9 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
   const setComposerDraft = useInboxStore((s) => s.setComposerDraft);
   const sendMessage = useInboxStore((s) => s.sendMessage);
   const loadingMessages = useInboxStore((s) => s.loadingMessages);
+  const replyDraftMessage = useInboxStore((s) => s.replyDraftMessage);
+  const setReplyDraftMessage = useInboxStore((s) => s.setReplyDraftMessage);
+  const clearReplyDraftMessage = useInboxStore((s) => s.clearReplyDraftMessage);
 
   const convo = useMemo(() => {
     return conversations.find((c) => c.id === conversationId);
@@ -198,6 +202,16 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
     }
   };
 
+  const getMessageText = (msg: any) => {
+    return msg?.content?.body || msg?.content?.text || '';
+  };
+
+  const getReplyTarget = (msg: any) => {
+    const replyToMessageId = msg?.content?.replyToMessageId;
+    if (!replyToMessageId) return null;
+    return messages.find((m: any) => m.id === replyToMessageId) || null;
+  };
+
   return (
     <div className="flex-1 min-h-0 flex flex-col relative">
       <div className="h-14 shrink-0 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
@@ -241,17 +255,48 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
             const inbound = dir === 'in' || dir === 'inbound';
             const outbound = dir === 'out' || dir === 'outbound';
 
-            const body = msg.content?.body || msg.content?.text || '';
+            const body = getMessageText(msg);
+            const replyTarget = getReplyTarget(msg);
+            const replyTargetText = replyTarget ? getMessageText(replyTarget) : '';
 
             return (
               <div
                 key={msg.id}
                 className={cn(
-                  'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
+                  'group max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm relative',
                   inbound ? 'bg-white border border-gray-200 mr-auto' : '',
                   outbound ? 'bg-whatsapp-light ml-auto border border-[#cfe8b8]' : '',
                 )}
               >
+                <button
+                  onClick={() => setReplyDraftMessage(msg)}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-gray-500 hover:text-gray-700 bg-white/80 border border-gray-200 rounded-md px-2 py-1 flex items-center gap-1"
+                  title="Reply"
+                >
+                  <CornerUpLeft size={10} />
+                  Reply
+                </button>
+
+                {replyTarget && (
+                  <div
+                    className={cn(
+                      'mb-2 rounded-lg border-l-4 px-3 py-2 text-xs',
+                      inbound
+                        ? 'bg-gray-50 border-gray-300 text-gray-600'
+                        : 'bg-[#d5efbf] border-green-600 text-gray-700',
+                    )}
+                  >
+                    <div className="font-medium mb-0.5">
+                      {replyTarget.direction === 'out' || replyTarget.direction === 'outbound'
+                        ? 'You'
+                        : convo?.contact?.name || 'Client'}
+                    </div>
+                    <div className="line-clamp-2 whitespace-pre-wrap">
+                      {replyTargetText || 'Message'}
+                    </div>
+                  </div>
+                )}
+
                 {body && <p className="whitespace-pre-wrap text-gray-900 leading-5">{body}</p>}
 
                 <div className="flex items-center justify-end gap-1 mt-1.5">
@@ -293,6 +338,30 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         </div>
 
         <div className="p-3 pt-2">
+          {replyDraftMessage && (
+            <div className="mb-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold text-gray-600 flex items-center gap-1">
+                    <CornerUpLeft size={12} />
+                    Replying to
+                  </div>
+                  <div className="text-xs text-gray-700 mt-1 line-clamp-2 whitespace-pre-wrap">
+                    {getMessageText(replyDraftMessage) || 'Message'}
+                  </div>
+                </div>
+
+                <button
+                  onClick={clearReplyDraftMessage}
+                  className="p-1 rounded-md hover:bg-gray-200 transition-colors"
+                  title="Cancel reply"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}

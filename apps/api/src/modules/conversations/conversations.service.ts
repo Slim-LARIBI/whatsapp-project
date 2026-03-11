@@ -170,6 +170,7 @@ export class ConversationsService {
     conversationId: string,
     agentUserId: string,
     body: string,
+    replyToMessageId?: string,
   ) {
     const convo = await this.convoRepo.findOne({
       where: { id: conversationId, tenantId },
@@ -189,6 +190,22 @@ export class ConversationsService {
       // throw new BadRequestException('24h window expired. Use template message.');
     }
 
+    let replyToWaMessageId: string | undefined;
+
+    if (replyToMessageId) {
+      const parentMessage = await this.messageRepo.findOne({
+        where: {
+          id: replyToMessageId,
+          tenantId,
+          conversationId,
+        },
+      });
+
+      if (parentMessage?.waMessageId) {
+        replyToWaMessageId = parentMessage.waMessageId;
+      }
+    }
+
     const message = this.messageRepo.create({
       tenantId,
       conversationId,
@@ -196,7 +213,10 @@ export class ConversationsService {
       senderId: agentUserId,
       direction: 'outbound',
       type: 'text',
-      content: { body },
+      content: {
+        body,
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+      },
       status: 'pending',
     });
 
@@ -209,6 +229,7 @@ export class ConversationsService {
       to: convo.contact?.phone,
       body,
       messageId: saved.id,
+      replyToWaMessageId,
     });
 
     await this.convoRepo.update(

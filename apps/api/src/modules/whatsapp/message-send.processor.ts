@@ -23,7 +23,17 @@ export class MessageSendProcessor extends WorkerHost {
   }
 
   async process(job: Job) {
-    const { messageId, tenantId, waAccountId, to, body, templateName, language, components } = job.data;
+    const {
+      messageId,
+      tenantId,
+      waAccountId,
+      to,
+      body,
+      templateName,
+      language,
+      components,
+      replyToWaMessageId,
+    } = job.data;
 
     this.logger.log(`Processing message send: ${messageId}`);
 
@@ -57,7 +67,12 @@ export class MessageSendProcessor extends WorkerHost {
         );
         waMessageId = result.waMessageId;
       } else {
-        const result = await this.waService.sendTextMessage(waAccount, to, body);
+        const result = await this.waService.sendTextMessage(
+          waAccount,
+          to,
+          body,
+          replyToWaMessageId,
+        );
         waMessageId = result.waMessageId;
       }
 

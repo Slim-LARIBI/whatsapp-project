@@ -112,7 +112,10 @@ class ApiClient {
     }>(`/api/conversations/${id}/messages`);
   }
 
-  async sendConversationMessage(id: string, payload: { body: string }) {
+  async sendConversationMessage(
+    id: string,
+    payload: { body: string; replyToMessageId?: string },
+  ) {
     return this.request<any>(`/api/conversations/${id}/messages`, {
       method: 'POST',
       body: JSON.stringify(payload),

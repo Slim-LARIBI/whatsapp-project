@@ -29,7 +29,11 @@ export interface Message {
   id: string;
   direction: 'in' | 'out' | 'inbound' | 'outbound';
   type: 'text';
-  content: { body?: string; text?: string };
+  content: {
+    body?: string;
+    text?: string;
+    replyToMessageId?: string;
+  };
   status: 'queued' | 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   createdAt: string;
   sender?: { name: string };
@@ -44,6 +48,7 @@ interface InboxState {
   usingMock: boolean;
 
   composerDraft: string;
+  replyDraftMessage: Message | null;
 
   bootstrap: () => Promise<void>;
   refreshConversations: () => Promise<void>;
@@ -53,6 +58,9 @@ interface InboxState {
   setComposerDraft: (text: string) => void;
   appendComposerDraft: (text: string) => void;
   clearComposerDraft: () => void;
+
+  setReplyDraftMessage: (message: Message | null) => void;
+  clearReplyDraftMessage: () => void;
 }
 
 function normalizeConversation(raw: any): Conversation {
@@ -131,7 +139,7 @@ function areConversationsDifferent(a: Conversation[], b: Conversation[]) {
 }
 
 /* =========================
-   LIVE POLLING (bug #2)
+   LIVE POLLING
 ========================= */
 let inboxPollerStarted = false;
 let inboxPoller: ReturnType<typeof setInterval> | null = null;
@@ -148,13 +156,16 @@ async function backgroundSync() {
     const convRows = Array.isArray(convRes?.data) ? convRes.data : Array.isArray(convRes) ? convRes : [];
     const normalizedConversations = convRows.map(normalizeConversation);
 
-    let nextSelectedId =
+    const nextSelectedId =
       state.selectedConversationId &&
       normalizedConversations.some((c) => c.id === state.selectedConversationId)
         ? state.selectedConversationId
         : normalizedConversations[0]?.id || null;
 
-    if (areConversationsDifferent(state.conversations, normalizedConversations) || nextSelectedId !== state.selectedConversationId) {
+    if (
+      areConversationsDifferent(state.conversations, normalizedConversations) ||
+      nextSelectedId !== state.selectedConversationId
+    ) {
       useInboxStore.setState({
         conversations: normalizedConversations,
         selectedConversationId: nextSelectedId,
@@ -206,6 +217,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
   usingMock: false,
 
   composerDraft: '',
+  replyDraftMessage: null,
 
   bootstrap: async () => {
     await get().refreshConversations();
@@ -254,7 +266,12 @@ export const useInboxStore = create<InboxState>((set, get) => ({
 
   selectConversation: async (id) => {
     if (!id) {
-      set({ selectedConversationId: null, messages: [], composerDraft: '' });
+      set({
+        selectedConversationId: null,
+        messages: [],
+        composerDraft: '',
+        replyDraftMessage: null,
+      });
       return;
     }
 
@@ -262,6 +279,7 @@ export const useInboxStore = create<InboxState>((set, get) => ({
       selectedConversationId: id,
       loadingMessages: true,
       composerDraft: '',
+      replyDraftMessage: null,
     });
 
     try {
@@ -287,11 +305,16 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     const conversationId = state.selectedConversationId;
     if (!conversationId || !body.trim()) return;
 
+    const replyToMessageId = state.replyDraftMessage?.id;
+
     const optimisticMessage: Message = {
       id: `tmp_${Date.now()}`,
       direction: 'outbound',
       type: 'text',
-      content: { body },
+      content: {
+        body,
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+      },
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
@@ -299,10 +322,14 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     set({
       messages: [...state.messages, optimisticMessage],
       composerDraft: '',
+      replyDraftMessage: null,
     });
 
     try {
-      await api.sendConversationMessage(conversationId, { body });
+      await api.sendConversationMessage(conversationId, {
+        body,
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+      });
 
       await get().selectConversation(conversationId);
       await get().refreshConversations();
@@ -325,4 +352,8 @@ export const useInboxStore = create<InboxState>((set, get) => ({
     })),
 
   clearComposerDraft: () => set({ composerDraft: '' }),
+
+  setReplyDraftMessage: (message) => set({ replyDraftMessage: message }),
+
+  clearReplyDraftMessage: () => set({ replyDraftMessage: null }),
 }));

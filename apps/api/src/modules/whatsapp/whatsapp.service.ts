@@ -49,15 +49,22 @@ export class WhatsappService {
     waAccount: WhatsappAccount,
     to: string,
     body: string,
+    replyToWaMessageId?: string,
   ): Promise<{ waMessageId?: string }> {
     const cleanTo = to.replace(/\D/g, '');
 
-    const payload = {
+    const payload: any = {
       messaging_product: 'whatsapp',
       to: cleanTo,
       type: 'text',
       text: { body },
     };
+
+    if (replyToWaMessageId) {
+      payload.context = {
+        message_id: replyToWaMessageId,
+      };
+    }
 
     return this.sendMessage(waAccount, payload);
   }

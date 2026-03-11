@@ -43,9 +43,15 @@ export class ConversationsController {
     @TenantId() tenantId: string,
     @Param('id') id: string,
     @CurrentUser() user: { userId: string },
-    @Body() dto: { body: string },
+    @Body() dto: { body: string; replyToMessageId?: string },
   ) {
-    return this.convoService.sendAgentReply(tenantId, id, user.userId, dto.body);
+    return this.convoService.sendAgentReply(
+      tenantId,
+      id,
+      user.userId,
+      dto.body,
+      dto.replyToMessageId,
+    );
   }
 
   @Patch(':id/assign')
