@@ -202,14 +202,16 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
     <div className="flex-1 min-h-0 flex flex-col relative">
       <div className="h-14 shrink-0 border-b border-gray-200 px-4 flex items-center justify-between bg-white">
         <div className="min-w-0">
-          <div className="font-medium text-sm truncate">{convo?.contact?.name || 'Conversation'}</div>
+          <div className="font-semibold text-sm truncate text-gray-900">
+            {convo?.contact?.name || 'Conversation'}
+          </div>
           <div className="text-xs text-gray-400">{convo?.contact?.phone || ''}</div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setTplOpen(true)}
-            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-2"
+            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white hover:bg-gray-50 flex items-center gap-2 shadow-sm transition-colors"
           >
             <FileText size={14} />
             Templates
@@ -222,7 +224,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
                 `je m’en occupe. Pouvez-vous me partager votre numéro de commande ?`;
               setComposerDraft(composerDraft?.trim() ? `${composerDraft}\n\n${suggestion}` : suggestion);
             }}
-            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-2"
+            className="px-3 py-1.5 text-xs rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 flex items-center gap-2 shadow-sm transition-colors"
           >
             <Sparkles size={14} />
             AI reply
@@ -247,12 +249,12 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
                 className={cn(
                   'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm',
                   inbound ? 'bg-white border border-gray-200 mr-auto' : '',
-                  outbound ? 'bg-whatsapp-light ml-auto' : '',
+                  outbound ? 'bg-whatsapp-light ml-auto border border-[#cfe8b8]' : '',
                 )}
               >
-                {body && <p className="whitespace-pre-wrap">{body}</p>}
+                {body && <p className="whitespace-pre-wrap text-gray-900 leading-5">{body}</p>}
 
-                <div className="flex items-center justify-end gap-1 mt-1">
+                <div className="flex items-center justify-end gap-1 mt-1.5">
                   <span className="text-[10px] text-gray-400">
                     {msg.createdAt ? format(new Date(msg.createdAt), 'HH:mm') : ''}
                   </span>
@@ -269,13 +271,13 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
         <div className="px-3 pt-3 pb-2 flex gap-2 flex-wrap">
           <button
             onClick={() => setTplOpen(true)}
-            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50 flex items-center gap-2"
+            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white hover:bg-gray-50 flex items-center gap-2 shadow-sm transition-colors"
           >
             <FileText size={14} /> Templates
           </button>
           <button
             onClick={() => setComposerDraft(composerDraft?.trim() ? `${composerDraft} [Tag]` : '[Tag]')}
-            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50"
+            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white hover:bg-gray-50 shadow-sm transition-colors"
           >
             Add tag
           </button>
@@ -284,7 +286,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
               const line = `Order #${MOCK_VARS.order_id} — ${MOCK_VARS.order_total} TND`;
               setComposerDraft(composerDraft?.trim() ? `${composerDraft}\n${line}` : line);
             }}
-            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 hover:bg-gray-50"
+            className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 bg-white hover:bg-gray-50 shadow-sm transition-colors"
           >
             View order
           </button>
@@ -299,13 +301,13 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
               onKeyDown={handleKeyDown}
               placeholder="Type a message... (Enter to send, Shift+Enter new line)"
               rows={1}
-              className="flex-1 resize-none overflow-hidden border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-whatsapp-green"
+              className="flex-1 resize-none overflow-hidden border border-gray-200 bg-white rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-whatsapp-green shadow-sm"
             />
 
             <button
               onClick={handleSend}
               disabled={!composerDraft.trim() || sending}
-              className="p-3 bg-whatsapp-green text-white rounded-xl hover:bg-whatsapp-dark disabled:opacity-50 transition-colors"
+              className="p-3 bg-whatsapp-green text-white rounded-xl hover:bg-whatsapp-dark disabled:opacity-50 transition-colors shadow-sm"
               title="Send"
             >
               <Send size={18} />
@@ -316,16 +318,16 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
       {tplOpen && (
         <div className="absolute inset-0 z-50">
-          <div className="absolute inset-0 bg-black/20" onClick={() => setTplOpen(false)} />
+          <div className="absolute inset-0 bg-black/20 backdrop-blur-[1px]" onClick={() => setTplOpen(false)} />
           <div className="absolute right-0 top-0 h-full w-[420px] bg-white border-l border-gray-200 shadow-xl flex flex-col">
-            <div className="h-14 px-4 border-b border-gray-200 flex items-center justify-between">
-              <div className="font-semibold text-sm">Templates</div>
-              <button onClick={() => setTplOpen(false)} className="p-2 rounded-lg hover:bg-gray-50">
+            <div className="h-14 px-4 border-b border-gray-200 flex items-center justify-between bg-white">
+              <div className="font-semibold text-sm text-gray-900">Templates</div>
+              <button onClick={() => setTplOpen(false)} className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="p-3 border-b border-gray-200 space-y-2">
+            <div className="p-3 border-b border-gray-200 space-y-2 bg-white">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
                 <input
@@ -360,10 +362,10 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
                 });
 
                 return (
-                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                  <div key={t.id} className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold truncate">{t.title}</div>
+                        <div className="text-sm font-semibold truncate text-gray-900">{t.title}</div>
                         <div className="mt-1 flex flex-wrap gap-1">
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
                             {getCategoryLabel(t.category)}
@@ -384,7 +386,7 @@ export function ConversationView({ conversationId }: ConversationViewProps) {
 
                       <button
                         onClick={() => onInsertTemplate(t)}
-                        className="px-3 py-1.5 text-xs rounded-lg bg-whatsapp-green text-white hover:bg-whatsapp-dark"
+                        className="px-3 py-1.5 text-xs rounded-lg bg-whatsapp-green text-white hover:bg-whatsapp-dark shadow-sm transition-colors"
                       >
                         Insert
                       </button>

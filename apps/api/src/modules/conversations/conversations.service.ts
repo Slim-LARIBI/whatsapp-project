@@ -39,7 +39,6 @@ export class ConversationsService {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(query.limit || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
-    // ⚠️ IMPORTANT: utiliser les "property names" et PAS les noms de colonnes DB
     const qb = this.convoRepo
       .createQueryBuilder('c')
       .where('c.tenantId = :tenantId', { tenantId })
@@ -50,16 +49,17 @@ export class ConversationsService {
     if (query.status) {
       qb.andWhere('c.status = :status', { status: query.status });
     }
+
     if (query.assignedTo) {
       qb.andWhere('c.assignedTo = :assignedTo', { assignedTo: query.assignedTo });
     }
 
-    // ✅ property name + nulls last
     qb.orderBy('c.lastMessageAt', 'DESC', 'NULLS LAST')
       .skip((page - 1) * limit)
       .take(limit);
 
     const [data, total] = await qb.getManyAndCount();
+
     return { data, meta: { page, limit, total } };
   }
 
@@ -68,11 +68,19 @@ export class ConversationsService {
       where: { id, tenantId },
       relations: ['contact', 'assignee', 'waAccount'],
     });
-    if (!convo) throw new NotFoundException('Conversation not found');
+
+    if (!convo) {
+      throw new NotFoundException('Conversation not found');
+    }
+
     return convo;
   }
 
-  async getMessages(tenantId: string, conversationId: string, query: { page?: number; limit?: number }) {
+  async getMessages(
+    tenantId: string,
+    conversationId: string,
+    query: { page?: number; limit?: number },
+  ) {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(query.limit || 50, MAX_PAGE_SIZE);
 
@@ -95,13 +103,13 @@ export class ConversationsService {
     });
 
     if (!convo) {
-      // ✅ pas de cast, repo est bien Repository<Conversation>
       const created = this.convoRepo.create({
         tenantId,
         contactId,
         waAccountId,
         status: 'open',
       });
+
       convo = await this.convoRepo.save(created);
     }
 
@@ -120,7 +128,6 @@ export class ConversationsService {
       contactId: string;
     },
   ) {
-    // ✅ pas de cast Message[] → Message
     const message = this.messageRepo.create({
       tenantId: convo.tenantId,
       conversationId: convo.id,
@@ -144,10 +151,12 @@ export class ConversationsService {
       },
     );
 
-    // 🔔 websocket update
     this.gateway.emitConversationUpdate(convo.tenantId, {
       conversationId: convo.id,
-      update: { lastMessageAt: new Date(), lastInboundAt: new Date() },
+      update: {
+        lastMessageAt: new Date(),
+        lastInboundAt: new Date(),
+      },
     });
 
     return saved;
@@ -156,34 +165,42 @@ export class ConversationsService {
   // -----------------------------
   // OUTBOUND AGENT REPLY
   // -----------------------------
-    async sendAgentReply(tenantId: string, conversationId: string, agentUserId: string, body: string) {
+  async sendAgentReply(
+    tenantId: string,
+    conversationId: string,
+    agentUserId: string,
+    body: string,
+  ) {
     const convo = await this.convoRepo.findOne({
       where: { id: conversationId, tenantId },
       relations: ['waAccount', 'contact'],
     });
-    if (!convo) throw new NotFoundException('Conversation not found');
 
-    if (!body?.trim()) throw new BadRequestException('Body is required');
+    if (!convo) {
+      throw new NotFoundException('Conversation not found');
+    }
 
-    // (optionnel) règle 24h WhatsApp
+    if (!body?.trim()) {
+      throw new BadRequestException('Body is required');
+    }
+
     const within24h = isWithin24hWindow(convo.lastInboundAt ? new Date(convo.lastInboundAt) : null);
     if (!within24h) {
       // throw new BadRequestException('24h window expired. Use template message.');
     }
 
-    // ✅ IMPORTANT: ne pas mettre sentBy (le champ n'existe pas dans Message entity)
     const message = this.messageRepo.create({
       tenantId,
       conversationId,
       contactId: convo.contactId,
+      senderId: agentUserId,
       direction: 'outbound',
       type: 'text',
       content: { body },
-      status: 'queued',
+      status: 'pending',
     });
 
-    // ✅ force TypeScript à comprendre que c'est un Message (pas Message[])
-    const saved = (await this.messageRepo.save(message)) as unknown as Message;
+    const saved = await this.messageRepo.save(message);
 
     await this.sendQueue.add(QUEUE_MESSAGE_SEND, {
       tenantId,
@@ -211,8 +228,13 @@ export class ConversationsService {
   // ASSIGN
   // -----------------------------
   async assign(tenantId: string, conversationId: string, userId: string | null) {
-    const convo = await this.convoRepo.findOne({ where: { id: conversationId, tenantId } });
-    if (!convo) throw new NotFoundException('Conversation not found');
+    const convo = await this.convoRepo.findOne({
+      where: { id: conversationId, tenantId },
+    });
+
+    if (!convo) {
+      throw new NotFoundException('Conversation not found');
+    }
 
     await this.convoRepo.update(
       { id: conversationId, tenantId },
@@ -231,8 +253,13 @@ export class ConversationsService {
   // UPDATE STATUS
   // -----------------------------
   async updateStatus(tenantId: string, conversationId: string, status: string) {
-    const convo = await this.convoRepo.findOne({ where: { id: conversationId, tenantId } });
-    if (!convo) throw new NotFoundException('Conversation not found');
+    const convo = await this.convoRepo.findOne({
+      where: { id: conversationId, tenantId },
+    });
+
+    if (!convo) {
+      throw new NotFoundException('Conversation not found');
+    }
 
     await this.convoRepo.update(
       { id: conversationId, tenantId },
@@ -257,19 +284,38 @@ export class ConversationsService {
     errorCode?: string,
     errorTitle?: string,
   ) {
-    const msg = await this.messageRepo.findOne({ where: { tenantId, waMessageId } });
-    if (!msg) return { ok: false, reason: 'message_not_found' };
+    const msg = await this.messageRepo.findOne({
+      where: { tenantId, waMessageId },
+    });
+
+    if (!msg) {
+      return { ok: false, reason: 'message_not_found' };
+    }
+
+    const rank: Record<string, number> = {
+      pending: 0,
+      sent: 1,
+      delivered: 2,
+      read: 3,
+      failed: 99,
+    };
+
+    const currentRank = rank[msg.status] ?? -1;
+    const nextRank = rank[status] ?? -1;
+
+    if (msg.status !== 'failed' && status !== 'failed' && nextRank <= currentRank) {
+      return { ok: true, skipped: true };
+    }
 
     await this.messageRepo.update(
       { id: msg.id, tenantId },
       {
         status,
-        errorCode: errorCode || null,
-        errorTitle: errorTitle || null,
-      } as any,
+        errorCode: errorCode ? Number(errorCode) : null,
+        errorMessage: errorTitle || null,
+      },
     );
 
-    // refresh convo if needed
     this.gateway.emitConversationUpdate(tenantId, {
       conversationId: msg.conversationId,
       update: { lastMessageAt: new Date() },
